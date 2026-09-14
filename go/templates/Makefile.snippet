@@ -1,0 +1,45 @@
+# Standard Go Quality Targets (include or adapt in project Makefile)
+
+.PHONY: all build check ci lint audit review static-analysis test commit bump clean
+
+all: build
+
+build:
+	go build -o $(BIN_NAME) .
+
+# Fast everyday gate: format, vet, baseline staticcheck, audit, test, build
+check:
+	tools/check
+
+ci: check
+
+# Sizing & cognitive complexity audit
+audit:
+	go-audit
+
+# Fast static linting
+lint:
+	go vet ./...
+	staticcheck ./...
+	go-audit --quiet
+
+# Deep multi-tool static analysis
+review: static-analysis
+static-analysis:
+	go-static-analysis
+
+# Offline unit tests
+test:
+	go test -v ./...
+
+# Gated commit (runs check first, stages, commits, records .verified_head)
+commit:
+	tools/commit "$(msg)"
+
+# Increment patch version, verify, commit, push, and install
+bump:
+	tools/bump
+
+clean:
+	go clean
+	rm -f $(BIN_NAME)

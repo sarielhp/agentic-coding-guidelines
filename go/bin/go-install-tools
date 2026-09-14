@@ -1,0 +1,42 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'open3'
+
+ENV['PATH'] = "#{File.expand_path('~/.go/bin')}:#{File.expand_path('~/go/bin')}:#{ENV['PATH']}"
+
+TOOLS = {
+  'dupl' => 'github.com/mibk/dupl@latest',
+  'gocritic' => 'github.com/go-critic/go-critic/cmd/gocritic@latest',
+  'shadow' => 'golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@latest',
+  'revive' => 'github.com/mgechev/revive@latest',
+  'govulncheck' => 'golang.org/x/vuln/cmd/govulncheck@latest'
+}.freeze
+
+puts "\e[1m=== Installing Static Code Analysis Tools ===\e[0m\n"
+
+installed = 0
+failed = 0
+
+TOOLS.each do |binary, pkg|
+  bin_path = `which #{binary} 2>/dev/null`.strip
+  if !bin_path.empty? && File.executable?(bin_path)
+    puts "  \e[32m✔\e[0m #{binary} already installed at #{bin_path}"
+    installed += 1
+    next
+  end
+
+  puts "  Installing #{binary} from #{pkg}..."
+  stdout, stderr, status = Open3.capture3("go install #{pkg}")
+  if status.success?
+    puts "  \e[32m✔\e[0m Successfully installed #{binary}"
+    installed += 1
+  else
+    puts "  \e[31m✗\e[0m Failed to install #{binary}:"
+    puts stderr unless stderr.empty?
+    failed += 1
+  end
+end
+
+puts "\n\e[1mSummary:\e[0m #{installed} installed, #{failed} failed"
+exit(failed.positive? ? 1 : 0)

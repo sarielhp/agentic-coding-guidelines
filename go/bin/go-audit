@@ -1,0 +1,261 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'optparse'
+
+MAX_LINES = 1100
+SOFT_LIMIT = 800
+MAX_FUNC_LINES = 110
+BUILDER_FUNC_LIMIT = 160
+DISPATCHER_FUNC_LIMIT = 200
+TEST_FUNC_LIMIT = 250
+MAX_DEPTH = 4
+MAX_BRANCHES = 15
+BUILDER_BRANCHES = 20
+
+options = {
+  max: MAX_LINES,
+  soft: SOFT_LIMIT,
+  max_func: MAX_FUNC_LINES,
+  builder_max: BUILDER_FUNC_LIMIT,
+  dispatcher_max: DISPATCHER_FUNC_LIMIT,
+  test_func_max: TEST_FUNC_LIMIT,
+  max_depth: MAX_DEPTH,
+  max_branches: MAX_BRANCHES,
+  builder_branches: BUILDER_BRANCHES,
+  quiet: false,
+  strict: false,
+  include_tests: false
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: go-audit [options] [directory]"
+  opts.on("-m", "--max LINES", Integer, "Hard limit for file lines (default: #{MAX_LINES})") { |v| options[:max] = v }
+  opts.on("-s", "--soft LINES", Integer, "Warning threshold for file lines (default: #{SOFT_LIMIT})") { |v| options[:soft] = v }
+  opts.on("-f", "--max-func LINES", Integer, "Hard limit for function lines (default: #{MAX_FUNC_LINES})") { |v| options[:max_func] = v }
+  opts.on("--builder-max LINES", Integer, "Limit for low-complexity builder/UI functions (default: #{BUILDER_FUNC_LIMIT})") { |v| options[:builder_max] = v }
+  opts.on("--dispatcher-max LINES", Integer, "Limit for flat event/key dispatchers (default: #{DISPATCHER_FUNC_LIMIT})") { |v| options[:dispatcher_max] = v }
+  opts.on("--test-func-max LINES", Integer, "Limit for test functions (default: #{TEST_FUNC_LIMIT})") { |v| options[:test_func_max] = v }
+  opts.on("--max-depth DEPTH", Integer, "Hard limit for control-flow nesting depth (default: #{MAX_DEPTH})") { |v| options[:max_depth] = v }
+  opts.on("--max-branches BRANCHES", Integer, "Hard limit for function branch complexity (default: #{MAX_BRANCHES})") { |v| options[:max_branches] = v }
+  opts.on("--include-tests", "Apply production function limit to _test.go files too") { options[:include_tests] = true }
+  opts.on("--strict", "Exit with error code if any file or function exceeds hard limit") { options[:strict] = true }
+  opts.on("-q", "--quiet", "Show only warnings and violations") { options[:quiet] = true }
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit 0
+  end
+end.parse!
+
+target_dir = ARGV[0] ? File.expand_path(ARGV[0]) : Dir.pwd
+unless File.directory?(target_dir)
+  warn "Error: Target directory not found: #{target_dir}"
+  exit 1
+end
+
+def count_branches(lines)
+  branches = 0
+  in_block_comment = false
+  lines.each do |line|
+    l = line.dup
+    if in_block_comment
+      if l =~ %r{\*/}
+        l = l.sub(%r{^.*?\*/}, "")
+        in_block_comment = false
+      else
+        next
+      end
+    end
+    l = l.gsub(%r{/\*.*?\*/}, "")
+    if l =~ %r{/\*}
+      l = l.sub(%r{/\*.*$}, "")
+      in_block_comment = true
+    end
+    l = l.sub(%r{//.*$}, "")
+    l = l.gsub(/"(?:[^"\\]|\\.)*"/, '""')
+    l = l.gsub(/`[^`]*`/, '``')
+
+    branches += l.scan(/\b(?:if|for|switch|select)\b/).size
+  end
+  branches
+end
+
+def check_style_issues(func_lines, has_named_returns)
+  issues = []
+  func_lines.each_with_index do |line, idx|
+    # Naked return check
+    if has_named_returns && line =~ /^\s*return\s*(?:\/\/.*)?$/
+      issues << "naked return at line #{idx + 1}"
+    end
+
+    # Else after terminal statement check
+    if line =~ /\}\s*else\b/
+      prev = func_lines[0...idx].reverse.find { |l| l !~ /^\s*(?:\/\/|\/\*|\*|$)/ }
+      if prev =~ /^\s*(?:return\b|continue\b|break\b|panic\b)/
+        issues << "else after terminal statement at line #{idx + 1}"
+      end
+    end
+  end
+  issues
+end
+
+def scan_functions(lines, file_is_test, options)
+  funcs = []
+  in_func = false
+  func_name = ""
+  start_line = 0
+  brace_depth = 0
+  control_depth = 0
+  max_depth = 0
+  has_named_returns = false
+
+  lines.each_with_index do |line, idx|
+    if line =~ /^func\s+(?:\([^)]+\)\s+)?([A-Za-z0-9_]+)/ && !in_func
+      in_func = true
+      func_name = Regexp.last_match(1)
+      start_line = idx + 1
+      brace_depth = 0
+      control_depth = 0
+      max_depth = 0
+      has_named_returns = false
+
+      # Check for named return values in signature: e.g. (a string, err error)
+      if line =~ /^func\s+(?:\([^)]+\)\s+)?[A-Za-z0-9_]+\s*\([^)]*\)\s*\(([^)]+)\)\s*\{/
+        ret_spec = Regexp.last_match(1)
+        has_named_returns = ret_spec =~ /\b[a-zA-Z_]\w*\s+[a-zA-Z_*\[\]]/
+      end
+    end
+
+    next unless in_func
+
+    clean = line.sub(%r{//.*$}, "").gsub(/"(?:[^"\\]|\\.)*"/, '""').gsub(/`[^`]*`/, '``')
+    if clean =~ /\b(?:if|for|switch|select)\b.*\{/
+      control_depth += 1
+      max_depth = [max_depth, control_depth].max
+    end
+    if clean.include?("}") && control_depth > 0 && clean !~ /func\s*\(/
+      control_depth -= [clean.count("}"), control_depth].min
+    end
+
+    brace_depth += clean.count("{") - clean.count("}")
+    if brace_depth <= 0 && clean.include?("}")
+      func_len = (idx + 1) - start_line + 1
+      func_lines = lines[(start_line - 1)..idx]
+      branches = count_branches(func_lines)
+      is_test = file_is_test || func_name.start_with?("Test")
+      is_dispatcher = func_name.start_with?("handle") || func_name.start_with?("dispatch") || func_name.end_with?("Key") || func_name.end_with?("Route")
+      is_builder = func_name.start_with?("build") || func_name.start_with?("render") || func_name == "View" || func_name.start_with?("init") || func_name.start_with?("generate")
+
+      limit = if is_test && !options[:include_tests]
+                options[:test_func_max]
+              elsif is_dispatcher && max_depth <= 2
+                options[:dispatcher_max]
+              elsif is_builder && max_depth <= 3
+                options[:builder_max]
+              else
+                options[:max_func]
+              end
+
+      branch_limit = if is_builder || is_dispatcher
+                       options[:builder_branches]
+                     else
+                       options[:max_branches]
+                     end
+
+      issues = []
+      issues << "#{func_len} lines (limit #{limit})" if func_len > limit
+      issues << "depth #{max_depth} (limit #{options[:max_depth]})" if max_depth > options[:max_depth]
+      issues << "#{branches} branches (limit #{branch_limit})" if (!is_test || options[:include_tests]) && branches > branch_limit
+
+      style_issues = check_style_issues(func_lines, has_named_returns)
+      issues.concat(style_issues)
+
+      if issues.any?
+        funcs << {
+          name: func_name,
+          line: start_line,
+          lines: func_len,
+          depth: max_depth,
+          branches: branches,
+          issues: issues
+        }
+      end
+      in_func = false
+    end
+  end
+  funcs
+end
+
+go_files = Dir.glob(File.join(target_dir, '**', '*.go')).reject do |f|
+  f.include?('/.work/') || f.include?('/vendor/') || f.include?('/ruby/') || f.include?('/scripts/') || f.include?('/.git/')
+end.sort
+
+violations = []
+warnings = []
+passed = []
+long_funcs = []
+
+go_files.each do |file|
+  lines = File.readlines(file)
+  rel_path = file.sub("#{target_dir}/", '')
+  entry = { path: rel_path, lines: lines.size }
+
+  if lines.size > options[:max]
+    violations << entry
+  elsif lines.size > options[:soft]
+    warnings << entry
+  else
+    passed << entry
+  end
+
+  is_test = rel_path.end_with?('_test.go')
+  scan_functions(lines, is_test, options).each do |fn|
+    long_funcs << fn.merge(path: rel_path)
+  end
+end
+
+puts "\e[1m=== Go Sizing Audit (#{File.basename(target_dir)}) ===\e[0m"
+puts "Functions: hard limit #{options[:max_func]} lines (builders: #{options[:builder_max]}, dispatchers: #{options[:dispatcher_max]}, tests: #{options[:test_func_max]})"
+puts "Complexity: max depth #{options[:max_depth]} | max branches #{options[:max_branches]} (builders/dispatchers: #{options[:builder_branches]})"
+puts "Files: warn over #{options[:soft]} lines | hard limit #{options[:max]} lines\n\n"
+
+puts "\e[1mFunctions\e[0m"
+if long_funcs.empty?
+  puts "  \e[32m[PASS]\e[0m all functions meet sizing and complexity limits"
+else
+  long_funcs.sort_by { |f| -f[:lines] }.each do |f|
+    detail = f[:issues].join(', ')
+    puts format("  \e[31m[FAIL]\e[0m %4d lines  %s:%d %s() [%s]", f[:lines], f[:path], f[:line], f[:name], detail)
+  end
+  puts "\n  Decompose these in place — extract named helpers into the same file."
+  puts "  Do not split the file through a function body; that is the edit that loses control flow."
+end
+
+puts "\n\e[1mFiles\e[0m"
+unless options[:quiet]
+  passed.each do |e|
+    puts format("  \e[32m[PASS]\e[0m %4d lines  %s", e[:lines], e[:path])
+  end
+end
+
+warnings.each do |e|
+  puts format("  \e[33m[WARN]\e[0m %4d lines  %s (over #{options[:soft]} lines)", e[:lines], e[:path])
+end
+
+violations.each do |e|
+  puts format("  \e[31m[FAIL]\e[0m %4d lines  %s (exceeds #{options[:max]} lines)", e[:lines], e[:path])
+end
+
+if warnings.empty? && violations.empty? && options[:quiet]
+  puts "  \e[32m[PASS]\e[0m no file exceeds #{options[:soft]} lines"
+end
+
+puts "\n\e[1mSummary:\e[0m #{go_files.size} files — #{passed.size} pass, " \
+     "#{warnings.size} over #{options[:soft]}, #{violations.size} over #{options[:max]}; " \
+     "#{long_funcs.size} function(s) over limits"
+
+if options[:strict] && (violations.any? || long_funcs.any?)
+  warn "\n\e[31mError: #{violations.size} file(s) and #{long_funcs.size} function(s) exceed their hard limit in strict mode.\e[0m"
+  exit 1
+end
+exit 0

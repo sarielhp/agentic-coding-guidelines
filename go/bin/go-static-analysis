@@ -1,0 +1,181 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'open3'
+require 'optparse'
+
+ENV['PATH'] = "#{File.expand_path('~/.go/bin')}:#{File.expand_path('~/go/bin')}:#{ENV['PATH']}"
+
+options = {
+  dups: false,
+  critic: false,
+  shadow: false,
+  revive: false,
+  vuln: false,
+  quiet: false,
+  strict: false,
+  threshold: 50
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: go-static-analysis [options] [directory]"
+  opts.on('--dups', 'Run only code duplication & clone detector (dupl)') { options[:dups] = true }
+  opts.on('--critic', 'Run only Go Critic logic analyzer (gocritic)') { options[:critic] = true }
+  opts.on('--shadow', 'Run only variable shadowing check (shadow)') { options[:shadow] = true }
+  opts.on('--revive', 'Run only idiom & style hygiene check (revive)') { options[:revive] = true }
+  opts.on('--vuln', 'Run only dependency vulnerability check (govulncheck)') { options[:vuln] = true }
+  opts.on('-t', '--threshold TOKENS', Integer, "Duplication clone threshold (default: #{options[:threshold]})") { |v| options[:threshold] = v }
+  opts.on('-q', '--quiet', 'Show only sections with findings') { options[:quiet] = true }
+  opts.on('--strict', 'Exit with error code if any issues or clones are found') { options[:strict] = true }
+  opts.on('-h', '--help', 'Show this help') do
+    puts opts
+    exit 0
+  end
+end.parse!
+
+target_dir = ARGV[0] ? File.expand_path(ARGV[0]) : Dir.pwd
+unless File.directory?(target_dir)
+  warn "Error: Target directory not found: #{target_dir}"
+  exit 1
+end
+
+Dir.chdir(target_dir)
+proj_name = File.basename(target_dir)
+
+run_all = !options[:dups] && !options[:critic] && !options[:shadow] && !options[:revive] && !options[:vuln]
+
+puts "\e[1m=== Static Code Review (#{proj_name}) ===\e[0m\n"
+
+total_issues = 0
+
+def tool_available?(binary)
+  bin = `which #{binary} 2>/dev/null`.strip
+  !bin.empty? && File.executable?(bin)
+end
+
+# 1. Code Duplication & Clones (dupl)
+if run_all || options[:dups]
+  puts "\e[1;34m[1/5] Code Duplication & Clone Detection (dupl)\e[0m"
+  if !tool_available?('dupl')
+    puts "  \e[33m[SKIP]\e[0m dupl not found in PATH (run go-install-tools to install)\n\n"
+  else
+    go_files = `git ls-files '*.go' 2>/dev/null`.lines.map(&:strip).reject { |f| f.end_with?('_test.go') }
+    if go_files.empty?
+      go_files = Dir.glob('**/*.go').reject { |f| f.end_with?('_test.go') || f.include?('/vendor/') || f.include?('/.git/') }
+    end
+
+    if go_files.empty?
+      puts "  \e[32m[PASS]\e[0m No Go files to check.\n\n"
+    else
+      out, _, _ = Open3.capture3("dupl -threshold #{options[:threshold]} #{go_files.join(' ')}")
+      clones = out.strip
+      if clones.empty? || clones.include?('Found total 0 clone groups.')
+        puts "  \e[32m[PASS]\e[0m No duplicate code clones found (threshold: #{options[:threshold]} tokens).\n\n"
+      else
+        clone_count = clones[/Found total (\d+) clone groups/, 1] || 'some'
+        total_issues += clone_count.to_i
+        puts "  \e[33m[WARN]\e[0m Found #{clone_count} duplicate clone group(s):"
+        clones.lines.each do |line|
+          line = line.chomp
+          next if line.empty?
+
+          if line.start_with?('found ')
+            puts "    \e[1m#{line}\e[0m"
+          elsif line.start_with?('Found total')
+            puts "    \e[33m#{line}\e[0m"
+          else
+            puts "      #{line}"
+          end
+        end
+        puts "\n"
+      end
+    end
+  end
+end
+
+# 2. Logic, Symmetries & Anti-Patterns (gocritic)
+if run_all || options[:critic]
+  puts "\e[1;34m[2/5] Logic, Symmetries & Anti-Patterns (gocritic)\e[0m"
+  if !tool_available?('gocritic')
+    puts "  \e[33m[SKIP]\e[0m gocritic not found in PATH (run go-install-tools to install)\n\n"
+  else
+    out, _, _ = Open3.capture3('gocritic check ./...')
+    lines = out.lines.map(&:strip).reject(&:empty?)
+    if lines.empty?
+      puts "  \e[32m[PASS]\e[0m No gocritic logic or symmetry issues found.\n\n"
+    else
+      total_issues += lines.size
+      puts "  \e[33m[WARN]\e[0m Found #{lines.size} logic/pattern issue(s):"
+      lines.each { |l| puts "    \e[33m•\e[0m #{l}" }
+      puts "\n"
+    end
+  end
+end
+
+# 3. Variable Shadowing (shadow)
+if run_all || options[:shadow]
+  puts "\e[1;34m[3/5] Variable Shadowing (shadow)\e[0m"
+  shadow_bin = `which shadow 2>/dev/null`.strip
+  if shadow_bin.empty?
+    puts "  \e[33m[SKIP]\e[0m shadow not found in PATH (run go-install-tools to install)\n\n"
+  else
+    _, err, _ = Open3.capture3("go vet -vettool=#{shadow_bin} ./...")
+    shadow_lines = err.lines.map(&:strip).reject(&:empty?)
+    if shadow_lines.empty?
+      puts "  \e[32m[PASS]\e[0m No variable shadowing detected.\n\n"
+    else
+      total_issues += shadow_lines.size
+      puts "  \e[33m[WARN]\e[0m Found #{shadow_lines.size} shadowed variable(s):"
+      shadow_lines.each { |l| puts "    \e[33m•\e[0m #{l}" }
+      puts "\n"
+    end
+  end
+end
+
+# 4. Idiom & Style Hygiene (revive)
+if run_all || options[:revive]
+  puts "\e[1;34m[4/5] Go Idioms & Style Hygiene (revive)\e[0m"
+  if !tool_available?('revive')
+    puts "  \e[33m[SKIP]\e[0m revive not found in PATH (run go-install-tools to install)\n\n"
+  else
+    out, _, _ = Open3.capture3('revive -exclude vendor/... ./...')
+    revive_lines = out.lines.map(&:strip).reject(&:empty?)
+    if revive_lines.empty?
+      puts "  \e[32m[PASS]\e[0m Clean style and idioms.\n\n"
+    else
+      total_issues += revive_lines.size
+      puts "  \e[33m[WARN]\e[0m Found #{revive_lines.size} style/idiom notice(s):"
+      revive_lines.each { |l| puts "    \e[33m•\e[0m #{l}" }
+      puts "\n"
+    end
+  end
+end
+
+# 5. Dependency Vulnerabilities (govulncheck)
+if run_all || options[:vuln]
+  puts "\e[1;34m[5/5] Dependency Vulnerabilities (govulncheck)\e[0m"
+  if !tool_available?('govulncheck')
+    puts "  \e[33m[SKIP]\e[0m govulncheck not found in PATH (run go-install-tools to install)\n\n"
+  else
+    out, stderr, status = Open3.capture3('govulncheck ./...')
+    combined = "#{out}\n#{stderr}"
+    if status.success? && !combined.include?('Vulnerability #')
+      puts "  \e[32m[PASS]\e[0m No known CVE vulnerabilities found in call graph.\n\n"
+    else
+      vulns = combined.lines.select { |l| l.include?('Vulnerability #') || l.include?('Found in:') }
+      total_issues += [vulns.size, 1].max
+      puts "  \e[31m[WARN]\e[0m Vulnerabilities detected in module dependencies:"
+      puts combined
+      puts "\n"
+    end
+  end
+end
+
+puts "\e[1mReview Summary:\e[0m #{total_issues} advisory finding(s) across all checks."
+
+if options[:strict] && total_issues.positive?
+  warn "\e[31mReview failed with #{total_issues} finding(s) in strict mode.\e[0m"
+  exit 1
+end
+
+exit 0
