@@ -25,6 +25,8 @@ OptionParser.new do |opts|
   opts.on('--deny', 'Run only supply chain, license & ban check (cargo deny)') { options[:deny] = true }
   opts.on('--machete', 'Run only unused dependency scanner (cargo machete)') { options[:machete] = true }
   opts.on('--geiger', 'Run only unsafe code usage auditor (cargo geiger)') { options[:geiger] = true }
+  opts.on('--outdated', 'Run only dependency freshness check (cargo outdated)') { options[:outdated] = true }
+  opts.on('--semver', 'Run only SemVer API compatibility check (cargo semver-checks)') { options[:semver] = true }
   opts.on('--dups', 'Run only code duplication & clone detector (dupl)') { options[:dups] = true }
   opts.on('-t', '--threshold TOKENS', Integer, "Duplication clone threshold (default: #{options[:threshold]})") { |v| options[:threshold] = v }
   opts.on('-q', '--quiet', 'Show only sections with findings') { options[:quiet] = true }
@@ -146,7 +148,42 @@ if run_all || options[:geiger]
   end
 end
 
-# 6. Structural Code Duplication (dupl / AST clones)
+# 6. Dependency Outdatedness Check (cargo outdated)
+if options[:outdated]
+  puts "\e[1;34m[*] Dependency Outdatedness Check (cargo outdated)\e[0m"
+  if !tool_available?('cargo-outdated') && !system('cargo outdated --version >/dev/null 2>&1')
+    puts "  \e[33m[SKIP]\e[0m cargo-outdated not found in PATH (run rust-install-tools to install)\n\n"
+  else
+    out, _, status = Open3.capture3('cargo outdated')
+    if status.success? && !out.include?('---')
+      puts "  \e[32m[PASS]\e[0m All dependencies are up to date.\n\n"
+    else
+      puts "  \e[33m[NOTICE]\e[0m Outdated dependencies found:"
+      puts out.lines.first(25).join
+      puts "\n"
+    end
+  end
+end
+
+# 7. SemVer API Compatibility (cargo semver-checks)
+if options[:semver]
+  puts "\e[1;34m[*] SemVer API Compatibility (cargo semver-checks)\e[0m"
+  if !tool_available?('cargo-semver-checks') && !system('cargo semver-checks --version >/dev/null 2>&1')
+    puts "  \e[33m[SKIP]\e[0m cargo-semver-checks not found in PATH (run rust-install-tools to install)\n\n"
+  else
+    out, err, status = Open3.capture3('cargo semver-checks check-release')
+    if status.success?
+      puts "  \e[32m[PASS]\e[0m No breaking SemVer changes detected.\n\n"
+    else
+      total_issues += 1
+      puts "  \e[31m[WARN]\e[0m Breaking SemVer changes detected:"
+      puts "#{out}\n#{err}".lines.first(20).join
+      puts "\n"
+    end
+  end
+end
+
+# 8. Structural Code Duplication (dupl / AST clones)
 if run_all || options[:dups]
   puts "\e[1;34m[6/6] Code Duplication & Clone Detection (dupl)\e[0m"
   if !tool_available?('dupl')

@@ -26,8 +26,20 @@ This directory defines the authoritative architecture, cognitive complexity boun
 | Tool | Purpose | Primary Triggers |
 |---|---|---|
 | `rust-audit [dir]` | Audits functions against cognitive limits (depth $\le 4$, branches $\le 15$, tiered lines), `.unwrap()` violations, terminal `else`, and bare `unsafe`. | Pre-commit / `make audit` |
-| `rust-static-analysis [dir]` | Runs `cargo clippy`, `cargo audit`, `cargo deny`, `cargo machete`, and `cargo geiger`. | Periodic / Milestone / `make review` |
-| `rust-install-tools` | Installs external analysis cargo binaries into `~/.cargo/bin/`. | Once per machine |
+| `rust-static-analysis [dir]` | Runs `cargo clippy`, `cargo audit`, `cargo deny`, `cargo machete`, `cargo geiger`, and `dupl` (with `--outdated` and `--semver` flags). | Periodic / Milestone / `make review` |
+| `rust-install-tools` | Installs the complete suite of 10 cargo analysis & productivity tools into `~/.cargo/bin/` (accelerated with `cargo-binstall`). | Once per machine |
+
+### Tools Managed by `rust-install-tools`:
+1. **`cargo-binstall`**: Fast binary installer for official release binaries.
+2. **`cargo-audit`**: Security vulnerabilities & CVEs (RustSec Advisory Database).
+3. **`cargo-deny`**: Supply-chain security, licenses, and crate bans.
+4. **`cargo-machete`**: Unused dependencies scanner in `Cargo.toml`.
+5. **`cargo-geiger`**: Unsafe code usage auditor.
+6. **`cargo-nextest`**: Ultra-fast, isolated parallel test runner.
+7. **`cargo-mutants`**: Mutation testing engine to audit test suite quality.
+8. **`cargo-semver-checks`**: Semantic versioning & API breaking change detector.
+9. **`cargo-outdated`**: Dependency freshness and outdatedness checker.
+10. **`cargo-expand`**: Macro expansion and compiler desugaring inspector.
 
 ## Installation & Linking to `~/bin/`
 
