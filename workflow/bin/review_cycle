@@ -201,6 +201,11 @@ parser = OptionParser.new do |opts|
     exit 0
   end
 
+  opts.on('--setup', '--init', 'Setup and onboard current repository for review_cycle (doctor, config, symlinks, gitignore, agents doc)') do
+    MultiProfileReviewCycle.run_setup(options)
+    exit 0
+  end
+
   opts.on('-v', '--version', 'Show version and exit') do
     puts "review_cycle v#{VERSION}"
     exit 0
@@ -222,26 +227,27 @@ parser = OptionParser.new do |opts|
 end
 
 class MultiProfileReviewCycle
-  attr_reader :options, :state
+  attr_reader :options, :state, :config_file_path
 
   def initialize(options)
-    config = load_config_file(options[:config])
+    @config_file_path = self.class.find_config_file(options[:config])
+    config = load_config_file(@config_file_path)
     # CLI options take precedence over config file, which takes precedence over defaults
     @options = config.merge(options.reject { |_k, v| v.nil? })
     @state = load_state
   end
 
-  def load_config_file(explicit_path = nil)
-    if explicit_path
-      unless File.file?(explicit_path)
-        warn "⚠️ Config file not found: #{explicit_path}".yellow
-        return {}
-      end
-      return parse_config_file(explicit_path)
-    end
+  def self.find_config_file(explicit_path = nil)
+    return explicit_path if explicit_path && File.file?(explicit_path)
+    return nil if explicit_path
 
-    cfg_path = self.class.default_config_paths.find { |p| File.file?(p) }
-    cfg_path ? parse_config_file(cfg_path) : {}
+    default_config_paths.find { |p| File.file?(p) }
+  end
+
+  def load_config_file(path)
+    return {} unless path
+
+    parse_config_file(path)
   end
 
   def parse_config_file(path)
@@ -252,7 +258,35 @@ class MultiProfileReviewCycle
     {}
   end
 
+  def check_git_repository!
+    return if system('git rev-parse --is-inside-work-tree >/dev/null 2>&1')
+
+    puts "\n❌ [Fatal Error] review-cycle must be executed inside a valid Git repository.".bold.red
+    puts "   Initialize git with 'git init' or change into your project repository before running.\n\n"
+    exit 1
+  end
+
+  def check_config_contract!
+    return if options[:dry_run]
+
+    has_config = !@config_file_path.nil?
+    has_explicit_gate = (options[:gate_cmd] && !options[:gate_cmd].strip.empty?) ||
+                        (ENV['GATE_CMD'] && !ENV['GATE_CMD'].strip.empty?)
+    return if has_config || has_explicit_gate
+
+    puts "\n❌ [Config Error] No review_cycle.json configuration found for this repository.".bold.red
+    puts "   Autonomous remediation requires a declared verification gate contract."
+    puts "\n   To initialize repository configuration:"
+    puts "     \e[1mreview-cycle --setup\e[0m"
+    puts "\n   Or provide an explicit gate on the command line:"
+    puts "     \e[1mreview-cycle --gate-cmd \"cargo test\"\e[0m\n\n"
+    exit 1
+  end
+
   def run
+    check_git_repository!
+    check_config_contract!
+
     puts "==> review_cycle v#{VERSION}".bold.cyan
     Dir.chdir(REPO_ROOT) do
       if options[:branch]
@@ -547,6 +581,13 @@ class MultiProfileReviewCycle
 
   def candidate_gate_commands
     [
+      File.join(REPO_ROOT, 'tools', 'gate'),
+      File.join(REPO_ROOT, 'tools', 'test_light'),
+      File.join(REPO_ROOT, 'tools', 'gate.sh'),
+      File.join(REPO_ROOT, 'tools', 'check'),
+      File.join(REPO_ROOT, 'tools', 'check.rb'),
+      File.join(REPO_ROOT, 'gate'),
+      File.join(REPO_ROOT, 'check'),
       File.expand_path('gate', __dir__),
       File.expand_path('check', __dir__),
       File.expand_path('check.rb', __dir__)
@@ -613,17 +654,20 @@ class MultiProfileReviewCycle
     return options[:build_cmd] if options[:build_cmd] && !options[:build_cmd].strip.empty?
     return ENV['BUILD_CMD'] if ENV['BUILD_CMD'] && !ENV['BUILD_CMD'].strip.empty?
 
-    bl_bin = File.expand_path('build_local', __dir__)
-    return bl_bin if File.file?(bl_bin) && File.executable?(bl_bin)
-
-    bl_rb = File.expand_path('build_local.rb', __dir__)
-    return "ruby #{bl_rb}" if File.file?(bl_rb)
+    build_candidates = [
+      File.join(REPO_ROOT, 'tools', 'build_local'),
+      File.join(REPO_ROOT, 'tools', 'build_local.rb'),
+      File.join(REPO_ROOT, 'tools', 'install'),
+      File.join(REPO_ROOT, 'tools', 'install.rb'),
+      File.expand_path('build_local', __dir__),
+      File.expand_path('build_local.rb', __dir__),
+      File.expand_path('install', __dir__)
+    ]
+    candidate = build_candidates.find { |p| safe_install_script?(p) || (File.file?(p) && File.executable?(p)) }
+    return candidate.end_with?('.rb') && !File.executable?(candidate) ? "ruby #{candidate}" : candidate if candidate
 
     makefile = File.join(REPO_ROOT, 'Makefile')
     return 'make build' if File.file?(makefile) && File.read(makefile).match?(/^\s*build\s*:/)
-
-    inst = File.expand_path('install', __dir__)
-    return inst if safe_install_script?(inst)
 
     language_build_command
   end
@@ -1684,11 +1728,20 @@ class MultiProfileReviewCycle
                   'Adhere strictly to AGENTS.md guidelines'
                 end
 
+    gate = instance.resolve_gate_cmd
+    gate = gate.sub(%r{^#{Regexp.escape(REPO_ROOT)}/}, '') if gate&.start_with?(REPO_ROOT)
+
+    build = instance.resolve_build_cmd
+    build = build.sub(%r{^#{Regexp.escape(REPO_ROOT)}/}, '') if build&.start_with?(REPO_ROOT)
+
+    audit = instance.resolve_audit_executable || 'tools/audit'
+    audit = audit.sub(%r{^#{Regexp.escape(REPO_ROOT)}/}, '') if audit&.start_with?(REPO_ROOT)
+
     {
       target: instance.target_directory,
-      gate_cmd: instance.resolve_gate_cmd,
-      build_cmd: instance.resolve_build_cmd,
-      audit_cmd: instance.resolve_audit_executable || 'tools/audit',
+      gate_cmd: gate,
+      build_cmd: build,
+      audit_cmd: audit,
       guidelines: guideline,
       max_diff_lines: 800
     }.compact
@@ -1776,6 +1829,109 @@ class MultiProfileReviewCycle
 
     all_ok = checks.all?(&:first)
     puts "\n" + (all_ok ? "\e[32mAll prerequisites met! Review cycle engine ready.\e[0m\n" : "\e[33mSome prerequisites are missing. Address notices above before running full cycles.\e[0m\n")
+  end
+
+  def self.setup_ensure_git!
+    return if system('git rev-parse --is-inside-work-tree >/dev/null 2>&1')
+
+    puts "\n❌ [Fatal Error] review-cycle setup must be executed inside a valid Git repository.".bold.red
+    puts "   Run 'git init' first before setting up review_cycle.\n\n"
+    exit 1
+  end
+
+  def self.setup_generate_config
+    target_path = default_config_target
+    if File.file?(target_path)
+      puts "  ✔ Config file already exists: #{target_path}".green
+      return target_path
+    end
+
+    cfg = build_default_config
+    FileUtils.mkdir_p(File.dirname(target_path))
+    File.write(target_path, JSON.pretty_generate(cfg) + "\n")
+    puts "  ✔ Created configuration contract: #{target_path}".green
+    target_path
+  end
+
+  def self.setup_provision_audit
+    tools_dir = File.join(REPO_ROOT, 'tools')
+    FileUtils.mkdir_p(tools_dir)
+    target_audit = File.join(tools_dir, 'audit')
+    if File.exist?(target_audit)
+      puts "  ✔ Audit executable already present: #{target_audit}".green
+      return
+    end
+
+    standards_audit = File.expand_path('audit', __dir__)
+    if File.exist?(standards_audit)
+      FileUtils.ln_sf(standards_audit, target_audit)
+      puts "  ✔ Symlinked #{target_audit} -> #{standards_audit}".green
+    else
+      puts "  ℹ Audit executable will run via global path".cyan
+    end
+  end
+
+  def self.setup_update_gitignore(rep_dir = 'reviews')
+    gitignore_file = File.join(REPO_ROOT, '.gitignore')
+    entries = ["#{rep_dir}/archive/", "#{rep_dir}/logs/"]
+    existing = File.exist?(gitignore_file) ? File.read(gitignore_file) : ''
+
+    missing = entries.reject { |e| existing.include?(e) }
+    return if missing.empty?
+
+    new_content = existing.dup
+    new_content << "\n" unless new_content.empty? || new_content.end_with?("\n")
+    new_content << "# Review cycle artifacts\n"
+    missing.each { |m| new_content << "#{m}\n" }
+    File.write(gitignore_file, new_content)
+    puts "  ✔ Added #{missing.join(', ')} to .gitignore".green
+  end
+
+  def self.setup_update_agents_doc
+    agents_file = File.join(REPO_ROOT, 'AGENTS.md')
+    if File.exist?(agents_file)
+      content = File.read(agents_file)
+      if content.include?('Autonomous Review Cycle') || content.include?('review_cycle')
+        puts "  ✔ AGENTS.md already contains review cycle instructions".green
+      else
+        content << "\n\n" unless content.end_with?("\n\n")
+        content << agents_doc
+        File.write(agents_file, content)
+        puts "  ✔ Appended review cycle instructions to AGENTS.md".green
+      end
+    else
+      File.write(agents_file, "# Agent Guidelines\n\n#{agents_doc}\n")
+      puts "  ✔ Created AGENTS.md with review cycle instructions".green
+    end
+  end
+
+  def self.setup_print_agent_briefing(config_path)
+    puts "\n\e[1m=== AI Agent Operational Briefing ===\e[0m\n\n"
+    puts "Review cycle configured for repository: \e[36m#{REPO_ROOT}\e[0m"
+    puts "Configuration contract: \e[33m#{config_path}\e[0m\n\n"
+    puts "Available operational commands:"
+    puts "  1. \e[1;32mreview-cycle\e[0m             Run a single review round (audit -> plan -> sandbox fix -> gate -> verify -> commit)"
+    puts "  2. \e[1;32mreview-cycle --loop\e[0m      Continuously audit and heal until all 6 profiles pass clean"
+    puts "  3. \e[1;32mreview-cycle -p <lens>\e[0m   Target a specific profile (systems, security, correctness, resilience, performance, cli)"
+    puts "  4. \e[1;32mreview-cycle --status\e[0m    Inspect review state machine, history, and model rotation"
+    puts "  5. \e[1;32mreview-cycle --doctor\e[0m    Verify sandbox and auditor dependencies\n\n"
+    puts "Invariants enforced: Sizing limits (AGENTS.md), transactional rollback on gate failure, zero test weakening.\n\n"
+  end
+
+  def self.run_setup(options = {})
+    puts "\e[1m=== Review Cycle Repository Setup ===\e[0m\n\n"
+    setup_ensure_git!
+
+    puts "1. Checking Environment Prerequisites:"
+    run_doctor
+
+    puts "2. Initializing Repository Configuration:"
+    cfg_path = setup_generate_config
+    setup_provision_audit
+    setup_update_gitignore
+    setup_update_agents_doc
+
+    setup_print_agent_briefing(cfg_path)
   end
 end
 
