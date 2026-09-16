@@ -73,6 +73,14 @@ agentic-coding-guidelines/
         ├── commit.rb         # Gated commit with .verified_head
         ├── bump.rb           # 3-Tier milestone version bump & install script
         └── install.rb        # Direct cargo install --root ~ script
+└── workflow/                 # Autonomous Review & Remediation Loop (review-cycle)
+    ├── README.md             # Architecture, 5-phase loop & 4:2:1 cadence spec
+    ├── bin/                  # Autonomous orchestration binaries
+    │   ├── review_cycle      # 5-phase closed-loop orchestration engine
+    │   └── audit             # Multi-lens adversarial code auditor (6 domain profiles)
+    └── templates/            # Project configuration templates
+        ├── review_cycle.json # Standard repository contract template
+        └── AGENTS_SNIPPET.md # Drop-in documentation block for AGENTS.md
 ```
 
 ---

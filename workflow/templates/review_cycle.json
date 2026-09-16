@@ -1,0 +1,8 @@
+{
+  "target": "src",
+  "gate_cmd": "tools/gate",
+  "build_cmd": "tools/install",
+  "audit_cmd": "tools/audit",
+  "guidelines": "Adhere strictly to project architectural guidelines and cognitive complexity limits (depth <= 4, branches <= 15, tiered function sizing).",
+  "max_diff_lines": 800
+}
