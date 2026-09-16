@@ -149,3 +149,14 @@ tools/review_cycle --dry-run
 # Run audit standalone on a specific profile or file
 tools/audit -p security src/
 ```
+
+---
+
+## Prerequisites & Ecosystem Dependencies
+
+The autonomous remediation phase (Phase 2) leverages Bubblewrap sandboxing and autonomous agent dispatch:
+- **`bws`**: [Bubblewrap Git Worktree Sandbox](https://github.com/sarielhp/bws) (`bws gw`) creates an ephemeral, air-gapped sandbox clone with host `$HOME` protection and 1-key merge triage.
+- **`agy-run-wild`**: Autonomous coding agent runner dispatched inside the `bws` sandbox.
+- **`git`**: Version control and worktree management.
+- **Ruby >= 3.0**: Runtime for orchestrator scripts.
+
