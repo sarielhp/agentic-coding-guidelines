@@ -88,6 +88,51 @@ agentic-coding-guidelines/
 
 ---
 
+## Project Onboarding Protocol (Day 1 Bootstrap)
+
+To bring any new or existing repository under these standards in 3 deterministic steps:
+
+### Step 1: Adopt Language Workflow Templates
+Copy the standard quality gates, bumper, and guarded commit harness into your project's `tools/` directory:
+
+```bash
+mkdir -p tools
+
+# For Rust Projects:
+cp ~/prog/standards/rust/templates/{check.rb,commit.rb,bump.rb,install.rb} tools/
+chmod +x tools/*
+
+# For Go Projects:
+cp ~/prog/standards/go/templates/{check.rb,commit.rb,bump.rb} tools/
+chmod +x tools/*
+```
+
+### Step 2: Bootstrap the Review & Quality Contract
+Run the idempotent onboarding command from the root of your project:
+
+```bash
+review-cycle --setup
+```
+
+This automatically:
+- Validates environment prerequisites (`--doctor`: Ruby $\ge 3.0$, Git, `bws`, `agy-run-wild`, `audit`).
+- Generates `tools/review_cycle.json` (auto-detecting `tools/gate`, build commands, guidelines, and source targets).
+- Provisions a local `tools/audit` symlink pointing to the canonical multi-lens auditor.
+- Enforces Git hygiene by appending `reviews/archive/` and `reviews/logs/` to `.gitignore`.
+- Appends the standard review cycle specification block to `AGENTS.md`.
+
+### Step 3: The 4-Command Everyday Lifecycle
+Once onboarded, maintainers and AI agents operate through 4 canonical commands:
+
+| Command | Lifecycle Role | Frequency | Description |
+| :--- | :--- | :--- | :--- |
+| **`tools/gate`** | Fast Quality Gate | Every edit / pre-commit | Sub-second Tier 1 gate: unit tests, formatting, linter, cognitive complexity limits. |
+| **`tools/commit -m "..."`** | Guarded Git Commit | Multiple times daily | Runs `tools/gate`, verifies `.verified_head`, stages changes, commits, and pushes to remote. |
+| **`tools/bump`** | Milestone Release | Version milestones | 3-tier milestone guard (auto-triggers Tier 2 benchmarks and Tier 3 compiler tests), bumps versions, updates changelog, and pushes git tags. |
+| **`review-cycle`** | Autonomous Remediation | Periodic / on-demand | 5-phase closed-loop engine: 6-lens audit $\to$ `bws` sandbox fix $\to$ gate verification $\to$ auto-commit. |
+
+---
+
 ## How to Use in Your Projects
 
 ### 1. In Your Global or Project Agent Prompt (`AGENTS.md` / `CLAUDE.md` / `.cursorrules`)
