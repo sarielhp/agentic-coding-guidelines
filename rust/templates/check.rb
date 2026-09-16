@@ -39,9 +39,9 @@ run_cmd('Cargo clippy', 'cargo clippy --all-targets -- -D warnings')
 puts '--> [3/5] Cognitive complexity & sizing audit...'
 audit_bin = `which rust-audit 2>/dev/null`.strip
 audit_cmd = if !audit_bin.empty?
-              'rust-audit --quiet'
+              'rust-audit --quiet --strict'
             elsif File.exist?(File.join(root_dir, 'tools', 'rust-audit'))
-              "#{File.join(root_dir, 'tools', 'rust-audit')} --quiet"
+              "#{File.join(root_dir, 'tools', 'rust-audit')} --quiet --strict"
             end
 
 if audit_cmd

@@ -127,7 +127,7 @@ def check_style_issues(func_lines, is_test, check_unwraps)
       prev_comment = idx.positive? ? func_lines[idx - 1] : ''
       has_invariant = prev_comment.include?('// INVARIANT:') || line.include?('// INVARIANT:')
       is_lock_unwrap = l =~ /\.(?:lock|read|write)\s*\([^)]*\)\s*\.(?:unwrap|expect)\s*\(/
-      is_static_init = line =~ /\b(?:LazyLock|lazy_static)\b/
+      is_static_init = func_lines.any? { |fl| fl =~ /\b(?:LazyLock|lazy_static)\b/ }
       if (l =~ /\.(?:unwrap|expect)\s*\(/) && !has_invariant && !is_lock_unwrap && !is_static_init
         issues << "production unwrap/expect without // INVARIANT: at line #{idx + 1}"
       end
@@ -267,17 +267,37 @@ long_funcs = []
 rust_files.each do |file|
   lines = File.readlines(file)
   rel_path = file.sub("#{target_dir}/", '')
-  entry = { path: rel_path, lines: lines.size }
+  is_test = rel_path.end_with?('_tests.rs') || rel_path.start_with?('tests/') || rel_path.include?('/tests/')
+  file_max = is_test && !options[:include_tests] ? [options[:max], 1600].max : options[:max]
+  file_soft = is_test && !options[:include_tests] ? [options[:soft], 1200].max : options[:soft]
 
-  if lines.size > options[:max]
+  # Check for embedded tests in production files
+  test_line_count = 0
+  if !is_test
+    test_start = lines.index { |l| l =~ /^\s*(?:#\[cfg\(test\)\]\s*)?mod\s+tests\b/ }
+    test_line_count = test_start ? (lines.size - test_start) : 0
+  end
+
+  entry = { path: rel_path, lines: lines.size, test_lines: test_line_count }
+
+  if lines.size > file_max
+    if !is_test && test_line_count > 150
+      entry[:reason] = "exceeds #{file_max} lines (has #{test_line_count} test lines — extract to companion #{rel_path.sub(/\.rs$/, '_tests.rs')})"
+    else
+      entry[:reason] = "exceeds #{file_max} lines"
+    end
     violations << entry
-  elsif lines.size > options[:soft]
+  elsif lines.size > file_soft
+    if !is_test && test_line_count > 150
+      entry[:reason] = "over #{file_soft} lines (has #{test_line_count} test lines — recommend companion #{rel_path.sub(/\.rs$/, '_tests.rs')})"
+    else
+      entry[:reason] = "over #{file_soft} lines"
+    end
     warnings << entry
   else
     passed << entry
   end
 
-  is_test = rel_path.end_with?('_tests.rs') || rel_path.start_with?('tests/') || rel_path.include?('/tests/')
   scan_functions(lines, is_test, options).each do |fn|
     long_funcs << fn.merge(path: rel_path)
   end
@@ -286,7 +306,7 @@ end
 puts "\e[1m=== Rust Sizing & Cognitive Audit (#{File.basename(target_dir)}) ===\e[0m"
 puts "Functions: hard limit #{options[:max_func]} lines (builders: #{options[:builder_max]}, dispatchers: #{options[:dispatcher_max]}, tests: #{options[:test_func_max]})"
 puts "Complexity: max depth #{options[:max_depth]} | max branches #{options[:max_branches]} (builders/dispatchers: #{options[:builder_branches]})"
-puts "Files: warn over #{options[:soft]} lines | hard limit #{options[:max]} lines\n\n"
+puts "Files: warn over #{options[:soft]} lines | hard limit #{options[:max]} lines (tests: 1600 lines)\n\n"
 
 puts "\e[1mFunctions\e[0m"
 if long_funcs.empty?
@@ -308,11 +328,11 @@ unless options[:quiet]
 end
 
 warnings.each do |e|
-  puts format("  \e[33m[WARN]\e[0m %4d lines  %s (over #{options[:soft]} lines)", e[:lines], e[:path])
+  puts format("  \e[33m[WARN]\e[0m %4d lines  %s (%s)", e[:lines], e[:path], e[:reason])
 end
 
 violations.each do |e|
-  puts format("  \e[31m[FAIL]\e[0m %4d lines  %s (exceeds #{options[:max]} lines)", e[:lines], e[:path])
+  puts format("  \e[31m[FAIL]\e[0m %4d lines  %s (%s)", e[:lines], e[:path], e[:reason])
 end
 
 if warnings.empty? && violations.empty? && options[:quiet]

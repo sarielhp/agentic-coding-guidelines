@@ -91,6 +91,18 @@ Human working memory manages $7 \pm 2$ items simultaneously (Miller's Law). When
 - Rust `#[test]` functions that initialize test databases, construct complex mock payloads, execute commands, and run assertions.
 - Splitting cohesive test cases across multiple test helpers obscures the test narrative and hides assertion failures.
 
+### The Companion Test File Strategy: Avoiding the Monolithic & Outer tests/ Traps
+In idiomatic Rust, small-to-medium modules colocate unit tests in an inline `#[cfg(test)] mod tests { ... }` block at the bottom of the file. However, in large modules (parsers, formatters, CLI dispatchers), unit test suites frequently reach 800–1,500 lines. This creates two distinct failure modes:
+1. **The Monolithic Test Wall**: Inlining 1,000+ lines of tests into a 1,000-line module creates a 2,000+ line monolith. Human engineers and AI agents must scroll past hundreds of lines of fixtures, wasting LLM context tokens and obscuring domain logic.
+2. **The "Outer tests/" Trap**: When facing a 1,100-line file limit, agents often move unit tests to the root `tests/` integration directory. This degrades architecture: integration tests can only access the public API, forcing developers to make private internal helper functions `pub` or `pub(crate)` solely to test them.
+3. **The Companion File Solution (`*_tests.rs`)**: Declaring a companion file as a sibling:
+   ```rust
+   #[cfg(test)]
+   #[path = "<module>_tests.rs"]
+   mod tests;
+   ```
+   resolves both traps: it preserves 100% access to private internal functions via `super::*`, eliminates token bloat in the production file, and keeps release builds zero-cost. Our two-stage policy (permitted inline $\le 800$ lines, recommended at 800–1100, strictly enforced $> 1100$) prevents penalizing test coverage on normal files while stopping agents from building monolithic files.
+
 ---
 
 ## 5. Anti-Decomposition Traps in Autonomous Agents

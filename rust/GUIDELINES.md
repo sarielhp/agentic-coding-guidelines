@@ -67,6 +67,17 @@ Rather than a blunt, naive line cap (which causes destructive slicing), function
 
 ### Testing Strategy
 - **Fine-Grained Concurrent Tests**: Unlike Go where table-driven loops are standard, write fine-grained, independent `#[test]` and `#[tokio::test]` functions. `cargo test` executes test cases concurrently across CPU cores; isolated test functions prevent one failing case from masking subsequent test assertions.
+- **Companion Test Files (`*_tests.rs`)**:
+  - **Small to Mid-Sized Modules (<= 800 lines combined)**: Unit tests are permitted inline at the bottom of the file in `#[cfg(test)] mod tests { ... }`.
+  - **Large Modules (800–1100 lines with > 200 lines of tests)**: Strongly recommended to extract unit tests into a companion file `[module]_tests.rs`.
+  - **Monolithic Modules (> 1100 lines)**: Strictly enforced. Files exceeding 1100 lines with embedded tests must extract tests to companion `[module]_tests.rs` or decompose the module.
+  - **Declaration Pattern**:
+    ```rust
+    #[cfg(test)]
+    #[path = "<module>_tests.rs"]
+    mod tests;
+    ```
+  - **Encapsulation Advantage**: Unlike outer integration tests in `tests/` (which can only test the public crate API), a companion module remains an internal submodule with full access to private functions and internal structs via `super::*` without requiring `pub(crate)` visibility leaks.
 
 ### Safety & Unsafe Code
 - **Zero Unsafe Tolerance**: Autonomous agents must NEVER introduce `unsafe` blocks without explicit user permission.
@@ -98,8 +109,9 @@ When refactoring functions that exceed complexity or line limits, AI agents must
 ## 6. File Sizing Guidelines
 
 - **Comfort Metric (300–700 lines)**: Keeping functions under cognitive limits keeps files naturally within the 300–700 line range.
-- **Warning Threshold**: 800 lines (soft warning).
-- **Hard Limit**: 1100 lines (1600 lines for test files `*_tests.rs` or integration test suites).
+- **Warning Threshold (800 lines)**: Soft warning. If a file contains > 200 lines of tests, extract tests to companion `*_tests.rs`.
+- **Hard Limit (1100 lines)**: Production code hard limit. Files exceeding 1100 lines with embedded tests must extract tests to companion `*_tests.rs` or decompose into submodules.
+- **Test File Allowance (1600 lines)**: Dedicated test files (`*_tests.rs` or `tests/`) are granted a higher hard limit of 1600 lines to accommodate comprehensive test suites and data fixtures.
 - **Module Modularity**: Group modules by cohesive architectural responsibility (e.g. `parser.rs`, `formatter.rs`, `models.rs`, `transport.rs`).
 
 ---
