@@ -1,0 +1,48 @@
+# Standard Rust Quality Targets (include or adapt in project Makefile)
+
+.PHONY: all build check ci lint audit review static-analysis test commit bump install clean
+
+all: build
+
+build:
+	cargo build --release
+
+# Fast everyday gate: format, clippy, rust-audit, cargo test, cargo check
+check:
+	tools/check
+
+ci: check
+
+# Sizing, cognitive complexity, and unwrap/safety audit
+audit:
+	rust-audit
+
+# Fast static linting
+lint:
+	cargo fmt --check
+	cargo clippy --all-targets -- -D warnings
+	rust-audit --quiet
+
+# Deep multi-tool static analysis (clippy, audit, deny, machete, geiger)
+review: static-analysis
+static-analysis:
+	rust-static-analysis
+
+# Offline unit tests
+test:
+	cargo test
+
+# Gated commit (runs check first, stages, commits, records .verified_head)
+commit:
+	tools/commit "$(msg)"
+
+# 3-Tier milestone version bump, verify, tag, push, and install
+bump:
+	tools/bump
+
+# Install binary directly into ~/bin/
+install:
+	tools/install
+
+clean:
+	cargo clean
