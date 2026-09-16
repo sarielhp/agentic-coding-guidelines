@@ -2,6 +2,7 @@
 
 [![Go Standards](https://img.shields.io/badge/Language-Go-00ADD8?style=flat&logo=go)](go/GUIDELINES.md)
 [![Rust Standards](https://img.shields.io/badge/Language-Rust-dea584?style=flat&logo=rust)](rust/GUIDELINES.md)
+[![Review Cycle](https://img.shields.io/badge/Workflow-Review%20Cycle-8A2BE2?style=flat)](workflow/README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Architectural guidelines, cognitive complexity boundaries, and automated quality gates designed specifically for **AI pair programming and autonomous coding agents** (Claude, Gemini, Cursor, Copilot, ChatGPT).
@@ -37,6 +38,7 @@ Raw line counts are a crude proxy for code clarity. **Cognitive complexity** (ne
    - Never extract artificial continuation fragments (`stepA`, `stepB`).
    - Never extract helpers that require parameter dumping ($>4$ parameters or pointers/clones to pass local state).
    - In Rust: **Never insert `.clone()` or wrap in synchronization primitives solely to resolve borrow checker conflicts during function extraction**.
+6. **Closed-Loop Adversarial Review**: Continuous automated code quality audits across 6 orthogonal domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`), paired with transactionally safe remediation in isolated Git sandboxes ([`bws`](https://github.com/sarielhp/bws)) and a 4:2:1 model tier rotation.
 
 ---
 
@@ -46,6 +48,7 @@ Raw line counts are a crude proxy for code clarity. **Cognitive complexity** (ne
 agentic-coding-guidelines/
 ├── README.md                 # Overview & quickstart
 ├── LICENSE                   # MIT License
+├── review-cycle -> workflow  # Canonical symlink for workflow engine
 ├── go/
 │   ├── README.md             # Go quick reference & CLI usage
 │   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
@@ -59,20 +62,20 @@ agentic-coding-guidelines/
 │       ├── check.rb          # Pre-commit CI quality gate
 │       ├── commit.rb         # Gated commit with .verified_head
 │       └── bump.rb           # Version bump & install script
-└── rust/
-    ├── README.md             # Rust quick reference & CLI usage
-    ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
-    ├── RATIONALE.md          # Deep-dive philosophy, borrowck anti-patterns & divergences
-    ├── bin/                  # Standalone verification CLI tools
-    │   ├── rust-audit        # Sizing, cognitive complexity & unwrap/safety auditor
-    │   ├── rust-static-analysis # Multi-linter orchestrator (clippy, audit, deny, machete, geiger)
-    │   └── rust-install-tools# Automated cargo tools installer into ~/.cargo/bin/
-    └── templates/            # Reusable project workflow templates
-        ├── Makefile.snippet  # Standard Makefile targets
-        ├── check.rb          # Pre-commit CI quality gate (Tier 1)
-        ├── commit.rb         # Gated commit with .verified_head
-        ├── bump.rb           # 3-Tier milestone version bump & install script
-        └── install.rb        # Direct cargo install --root ~ script
+├── rust/
+│   ├── README.md             # Rust quick reference & CLI usage
+│   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
+│   ├── RATIONALE.md          # Deep-dive philosophy, borrowck anti-patterns & divergences
+│   ├── bin/                  # Standalone verification CLI tools
+│   │   ├── rust-audit        # Sizing, cognitive complexity & unwrap/safety auditor
+│   │   ├── rust-static-analysis # Multi-linter orchestrator (clippy, audit, deny, machete, geiger)
+│   │   └── rust-install-tools# Automated cargo tools installer into ~/.cargo/bin/
+│   └── templates/            # Reusable project workflow templates
+│       ├── Makefile.snippet  # Standard Makefile targets
+│       ├── check.rb          # Pre-commit CI quality gate (Tier 1)
+│       ├── commit.rb         # Gated commit with .verified_head
+│       ├── bump.rb           # 3-Tier milestone version bump & install script
+│       └── install.rb        # Direct cargo install --root ~ script
 └── workflow/                 # Autonomous Review & Remediation Loop (review-cycle)
     ├── README.md             # Architecture, 5-phase loop & 4:2:1 cadence spec
     ├── bin/                  # Autonomous orchestration binaries
@@ -101,6 +104,12 @@ Add the directives to your AI prompt or system instructions:
 - **Guidelines**: For any Rust project, strictly adhere to the architecture, cognitive complexity limits, `let-else` guard idioms, and anti-clone rules defined in `~/prog/standards/rust/GUIDELINES.md`.
 - **Rationale**: Consult `~/prog/standards/rust/RATIONALE.md` for the empirical reasoning, borrow-checker anti-decomposition constraints, and 3-tier milestone strategy.
 - **Validation**: Enforce compliance before committing using `rust-audit` (sizing, complexity & unwrap/unsafe audit) and `rust-static-analysis` (clippy, CVEs, supply-chain & unsafe review).
+
+## Autonomous Review & Remediation Loop
+- **Engine**: Execute closed-loop review and remediation using `review-cycle` (or `./tools/review_cycle`).
+- **Lenses**: Audit across the 6 specialized domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`) via `audit`.
+- **Sandbox Isolation**: Remediation runs inside isolated [bws](https://github.com/sarielhp/bws) sandboxes with automated git squash-merge and rollback guards.
+- **Contract**: Define project gates, build commands, and file limits in `review_cycle.json` (or `tools/review_cycle.json`).
 ```
 
 ### 2. Install the CLI Tools
@@ -119,9 +128,12 @@ ln -sf $(pwd)/go/bin/go-install-tools ~/bin/go-install-tools
 ln -sf $(pwd)/rust/bin/rust-audit ~/bin/rust-audit
 ln -sf $(pwd)/rust/bin/rust-static-analysis ~/bin/rust-static-analysis
 ln -sf $(pwd)/rust/bin/rust-install-tools ~/bin/rust-install-tools
+
+# Autonomous Review Workflow
+ln -sf $(pwd)/workflow/bin/review_cycle ~/bin/review-cycle
 ```
 
-### 3. Run Audits in Any Repository
+### 3. Run Audits & Workflows in Any Repository
 
 ```bash
 # Go Repositories
@@ -131,12 +143,19 @@ go-static-analysis
 # Rust Repositories
 rust-audit
 rust-static-analysis
+
+# Autonomous Review & Remediation Loop
+review-cycle --doctor         # Validate runtime dependencies (Ruby, git, bws, agy-run-wild, audit)
+review-cycle                  # Run a single review and remediation cycle
+review-cycle --loop           # Continuously audit and heal until all profiles pass cleanly
+review-cycle -p security      # Target a specific lens profile directly
 ```
 
 ---
 
-## Multi-Language Roadmap
+## Multi-Language & Workflow Roadmap
 
+- [x] **Autonomous Review Loop**: 5-phase closed-loop engine, 6 adversarial audit lenses, 4:2:1 model cadence, test-weakening guard, and [bws](https://github.com/sarielhp/bws) sandbox integration.
 - [x] **Go**: Cognitive sizing, Google Go idioms, two-tier static review tooling.
 - [x] **Rust**: Cognitive sizing, borrow-checker anti-patterns, `let-else` idioms, 3-tier milestone releases & static analysis tooling.
 - [ ] **Ruby**: Cognitive complexity, rubocop orchestration, agentic refactoring rules.
