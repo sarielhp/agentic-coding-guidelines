@@ -126,7 +126,9 @@ def check_style_issues(func_lines, is_test, check_unwraps)
     if !is_test && check_unwraps
       prev_comment = idx.positive? ? func_lines[idx - 1] : ''
       has_invariant = prev_comment.include?('// INVARIANT:') || line.include?('// INVARIANT:')
-      if (l =~ /\.(?:unwrap|expect)\s*\(/) && !has_invariant
+      is_lock_unwrap = l =~ /\.(?:lock|read|write)\s*\([^)]*\)\s*\.(?:unwrap|expect)\s*\(/
+      is_static_init = line =~ /\b(?:LazyLock|lazy_static)\b/
+      if (l =~ /\.(?:unwrap|expect)\s*\(/) && !has_invariant && !is_lock_unwrap && !is_static_init
         issues << "production unwrap/expect without // INVARIANT: at line #{idx + 1}"
       end
     end

@@ -43,20 +43,30 @@ Rather than a blunt, naive line cap (which causes destructive slicing), function
 ### Control Flow & "Line of Sight"
 - **Left-Aligned Happy Path**: Keep the primary execution path aligned to the left margin. Evaluate pre-conditions, input validation, and boundary conditions first using guard clauses and return early.
 - **The Canonical `let-else` Guard**: Prefer `let ... else { return ... };` over nested `if let Some(...) = ...` to extract values and return immediately on failure without rightward drift.
-- **Strict Ban on `else` After Terminal Expressions**: If an `if` block ends with `return`, `continue`, `break`, `panic!`, `bail!`, or `todo!`, an `else` or `else if` block is strictly forbidden. Dedent the subsequent code to the left margin.
+- **Statement-Level `else` Prohibition (`clippy::redundant_else`)**: If an `if` block is in **statement position** and ends with `return`, `continue`, `break`, `panic!`, `bail!`, or `todo!`, an `else` or `else if` block is strictly forbidden. Dedent the subsequent code. (Note: In **expression assignment position**, `let x = if c { a } else { b };` is standard idiomatic Rust).
 - **Loop Filtering via `continue`**: Filter collections at the top of `for` loops using `continue` instead of wrapping loop bodies in nested conditionals.
 
 ### Error Handling & Propagation
 - **The `?` Propagation Operator**: Use the `?` operator for linear, zero-cost error propagation along the happy path.
-- **Strict Prohibition of `.unwrap()` and `.expect()` in Production**: Never use `.unwrap()` or `.expect()` in production library or server code. If an unwrap is provably safe at compile time, an explicit comment starting with `// INVARIANT:` explaining why it cannot fail is strictly mandatory.
-- **No Silent Error Swallowing**: Never silently swallow errors with bare `.ok()`, `unwrap_or_default()`, or `let _ = ...` without an inline comment explaining why failure is non-fatal.
+- **Strict Prohibition of `.unwrap()` and `.expect()` on Fallible Operations**: Never call `.unwrap()` or `.expect()` on I/O, network responses, external commands, filesystem access, user input, or fallible parsers.
+- **Permitted Idiomatic Unwraps**:
+  1. **Mutex Poisoning**: `mutex.lock().unwrap()` is explicitly permitted; failing on lock poisoning is standard in systems Rust.
+  2. **Static Literal Initialization**: Compile-time constant initializers (`LazyLock::new(|| Regex::new("...").unwrap())`) are permitted.
+  3. **Verified Mathematical Invariants**: Must include a preceding `// INVARIANT: <explanation>` comment proving why failure is mathematically or structurally impossible.
+- **No Silent Error Swallowing**: Never silently swallow errors with bare `.ok()`, `unwrap_or_default()`, or `let _ = ...` without an inline comment explaining why failure is benign.
 - **Contextual Error Wrapping**: 
   - Application code: Use `anyhow::Context` (`.with_context(|| format!(...))` or `.context("...")`).
   - Library crates: Use `thiserror` to define strongly-typed, enumerated domain error types.
 
 ### Ownership, Borrowing & Memory Ergonomics
-- **Borrowing Over Allocation**: Accept borrowed slices (`&str`, `&[T]`) rather than owned collections (`String`, `Vec<T>`) in function arguments unless the function must store or transfer ownership of the data.
-- **Avoid "Clone to Appease Borrowck"**: Never insert `.clone()` or `.to_owned()` on expensive heap types solely to resolve borrow-checker errors during refactoring. Fix the data access architecture instead.
+- **Borrowing Over Allocation**: Accept borrowed slices (`&str`, `&[T]`) rather than owned collections (`String`, `Vec<T>`) in function arguments unless the function must store or transfer ownership.
+- **Differentiate Cheap vs. Pathological Clones**:
+  - **Cheap / Idiomatic Clones**: `Arc::clone(&ptr)` ($O(1)$ atomic increment), `Rc::clone`, `Copy` primitives, and small identifiers are fully permitted.
+  - **Pathological Borrowck Clones (Strictly Banned)**: Never call `.clone()` or `.to_owned()` on expensive collections (`Vec`, `HashMap`, large AST trees, file payloads) solely to appease the borrow checker during function refactoring. Restructure borrows via view structs or tuple destructuring.
+- **Lifetime Hygiene**: Do not introduce generic lifetime parameters (`<'a>`) into application business logic to circumvent borrow-checker errors. Prefer owned data or simple borrowed references; reserve generic lifetimes for zero-copy parsers.
+
+### Testing Strategy
+- **Fine-Grained Concurrent Tests**: Unlike Go where table-driven loops are standard, write fine-grained, independent `#[test]` and `#[tokio::test]` functions. `cargo test` executes test cases concurrently across CPU cores; isolated test functions prevent one failing case from masking subsequent test assertions.
 
 ### Safety & Unsafe Code
 - **Zero Unsafe Tolerance**: Autonomous agents must NEVER introduce `unsafe` blocks without explicit user permission.

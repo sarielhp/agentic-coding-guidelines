@@ -1,0 +1,22 @@
+# Clippy configuration for AI Agentic Rust workflows
+# Place in repository root as clippy.toml or .clippy.toml
+
+# Cognitive & Structural Complexity
+cognitive-complexity-threshold = 15
+too-many-lines-threshold = 110
+too-many-arguments-threshold = 5
+max-struct-bools = 3
+
+# Documentation identifiers
+doc-valid-idents = [
+    "GitHub",
+    "GitLab",
+    "JavaScript",
+    "TypeScript",
+    "BibTeX",
+    "LaTeX",
+    "DBLP",
+    "Crossref",
+    "OpenLibrary",
+    "ArXiv",
+]
