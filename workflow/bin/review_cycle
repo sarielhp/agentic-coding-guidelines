@@ -37,7 +37,8 @@ class String
   end unless method_defined?(:gray)
 end
 
-REPO_ROOT = File.expand_path('..', __dir__)
+git_root = `git rev-parse --show-toplevel 2>/dev/null`.strip
+REPO_ROOT = git_root.empty? ? File.expand_path('..', __dir__) : git_root
 VERSION = '0.1.0' unless defined?(VERSION)
 STATE_FILE = File.join(REPO_ROOT, 'reviews', 'state.json')
 
@@ -74,7 +75,10 @@ options = {
   strict_diff: false,
   skip_diff_audit: false,
   ignore_version: false,
-  config: nil
+  config: nil,
+  batch_commits: false,
+  branch: nil,
+  strict_tests: false
 }
 
 parser = OptionParser.new do |opts|
@@ -156,6 +160,23 @@ parser = OptionParser.new do |opts|
     options[:push] = false
   end
 
+  opts.on('--batch-commits', 'Defer remote git push until all review cycles in --loop mode complete') do
+    options[:batch_commits] = true
+  end
+
+  opts.on('--branch [NAME]', 'Run review cycles on an isolated feature branch (default: review-cycle/<date>)') do |br|
+    options[:branch] = br || true
+  end
+
+  opts.on('--strict-tests', 'Abort cycle and roll back if test-weakening or assertion-deficit is detected') do
+    options[:strict_tests] = true
+  end
+
+  opts.on('--doctor', 'Check environment prerequisites (git, bws, agy-run-wild, audit) and exit') do
+    MultiProfileReviewCycle.run_doctor
+    exit 0
+  end
+
   opts.on('--config PATH', 'Explicit path to configuration file (default: tools/review_cycle.json)') do |c|
     options[:config] = c
   end
@@ -234,6 +255,12 @@ class MultiProfileReviewCycle
   def run
     puts "==> review_cycle v#{VERSION}".bold.cyan
     Dir.chdir(REPO_ROOT) do
+      if options[:branch]
+        bname = options[:branch].is_a?(String) && !options[:branch].empty? ? options[:branch] : "review-cycle/#{Time.now.strftime('%Y%m%d-%H%M%S')}"
+        puts "\n==> [Branch Isolation] Switching to feature branch #{bname}...".bold.cyan
+        system('git', 'checkout', '-B', bname)
+      end
+
       cycle_count = 0
       clean_profiles = Set.new
 
@@ -271,6 +298,12 @@ class MultiProfileReviewCycle
       end
 
       print_loop_summary(cycle_count, clean_profiles) if options[:loop] && cycle_count > 1
+
+      if options[:batch_commits] && options[:loop] && options[:push]
+        puts "\n==> [Git] Pushing all batched review loop commits to remote...".bold.cyan
+        curr_branch = `git rev-parse --abbrev-ref HEAD`.strip
+        system('git', 'push', '--set-upstream', 'origin', curr_branch)
+      end
     end
   end
 
@@ -329,7 +362,7 @@ class MultiProfileReviewCycle
     base_sha = `git rev-parse HEAD`.strip
 
     unless remediate_in_sandbox(review_num, active_profile)
-      rollback_workspace(base_sha, 'Sandbox remediation failed or was discarded')
+      rollback_workspace(base_sha, 'Sandbox remediation failed or was discarded', num: review_num, profile: active_profile)
       record_history(review_num, active_profile, model_step, findings, 'failed_sandbox', files_edited: 0)
       print_bottom_summary(
         num: review_num, profile: active_profile, model_step: model_step,
@@ -340,7 +373,7 @@ class MultiProfileReviewCycle
 
     footprint = check_diff_footprint(base_sha)
     if footprint[:aborted]
-      rollback_workspace(base_sha, footprint[:reason])
+      rollback_workspace(base_sha, footprint[:reason], num: review_num, profile: active_profile)
       record_history(review_num, active_profile, model_step, findings, 'rejected_diff', files_edited: 0)
       print_bottom_summary(
         num: review_num, profile: active_profile, model_step: model_step,
@@ -350,7 +383,7 @@ class MultiProfileReviewCycle
     end
 
     unless verify_quality_gate
-      rollback_workspace(base_sha, 'Post-merge quality gate verification failed')
+      rollback_workspace(base_sha, 'Post-merge quality gate verification failed', num: review_num, profile: active_profile)
       record_history(review_num, active_profile, model_step, findings, 'failed_gate', files_edited: 0)
       print_bottom_summary(
         num: review_num, profile: active_profile, model_step: model_step,
@@ -408,7 +441,17 @@ class MultiProfileReviewCycle
     @log_file = nil
   end
 
-  def rollback_workspace(base_sha, reason)
+  def rollback_workspace(base_sha, reason, num: nil, profile: nil)
+    current_sha = `git rev-parse HEAD 2>/dev/null`.strip
+    if !current_sha.empty? && current_sha != base_sha
+      suffix = "#{num || 'unknown'}_#{profile || 'cycle'}_#{Time.now.strftime('%Y%m%d_%H%M%S')}"
+      failed_branch = "reviews/failed_#{suffix}"
+      Open3.capture3("git branch #{failed_branch} #{current_sha}")
+      save_msg = "\n💾 [Preservation] Preserved failed remediation commits on branch: #{failed_branch}"
+      puts save_msg.bold.cyan
+      log_write("#{save_msg}\n")
+    end
+
     msg = "\n⚠️ [Rollback] #{reason}. Reverting workspace to #{base_sha[0..8]}..."
     puts msg.bold.red
     log_write("#{msg}\n")
@@ -535,22 +578,21 @@ class MultiProfileReviewCycle
     return options[:audit_cmd] if options[:audit_cmd] && !options[:audit_cmd].strip.empty?
     return ENV['AUDIT_CMD'] if ENV['AUDIT_CMD'] && !ENV['AUDIT_CMD'].strip.empty?
 
-    tools_audit = File.expand_path('audit', __dir__)
-    return tools_audit if File.exist?(tools_audit) && (File.executable?(tools_audit) || !File.directory?(tools_audit))
+    candidates = [
+      File.join(REPO_ROOT, 'tools', 'audit'),
+      File.join(REPO_ROOT, 'tools', 'audit.rb'),
+      File.expand_path('audit', __dir__),
+      File.expand_path('audit.rb', __dir__),
+      File.join(REPO_ROOT, 'audit'),
+      File.join(REPO_ROOT, 'audit.rb'),
+      `which audit 2>/dev/null`.strip,
+      `which agy_audit 2>/dev/null`.strip
+    ]
+    candidates.find do |c|
+      next false if c.nil? || c.empty?
 
-    tools_audit_rb = File.expand_path('audit.rb', __dir__)
-    return "ruby #{tools_audit_rb}" if File.exist?(tools_audit_rb)
-
-    root_audit = File.join(REPO_ROOT, 'audit')
-    return root_audit if File.exist?(root_audit) && (File.executable?(root_audit) || !File.directory?(root_audit))
-
-    path_audit = `which audit 2>/dev/null`.strip
-    return path_audit unless path_audit.empty?
-
-    path_agy = `which agy_audit 2>/dev/null`.strip
-    return path_agy unless path_agy.empty?
-
-    nil
+      File.exist?(c) && (File.executable?(c) || c.end_with?('.rb'))
+    end
   end
 
   def safe_install_script?(path)
@@ -880,9 +922,23 @@ class MultiProfileReviewCycle
     end
   end
 
+  def recent_mitigations_context(limit = 3)
+    history = (@state['history'] || []).select { |h| h['outcome'] == 'remediated' }
+    return '' if history.empty?
+
+    recent = history.last(limit)
+    lines = ["RECENT REMEDIATIONS (Anti-Oscillation Ledger — do NOT revert or weaken architectural safeguards, defensive copying, or error wrappers introduced in these rounds):"]
+    recent.each do |h|
+      lines << "- Round #{h['number']} (#{h['profile']}): fixed #{h['findings']} issue(s) via #{h['model']}"
+    end
+    lines.join(' ')
+  end
+
   def remediate_prompt(profile, plan_path, report_path, summary_path)
     gate_note = resolve_gate_cmd ? " and verify with #{resolve_gate_cmd}" : ''
     guide_note = guideline_instructions
+    anti_oscillation = recent_mitigations_context
+    oscillation_note = anti_oscillation.empty? ? '' : " 5. Anti-Oscillation: #{anti_oscillation}"
 
     <<~PROMPT.strip.gsub(/\s+/, ' ')
       /goal Create an architectural plan in #{plan_path} addressing genuine defects from #{report_path},
@@ -895,7 +951,7 @@ class MultiProfileReviewCycle
       3. Quality Gate & Metrics: Run `tools/gate`#{gate_note} frequently and ensure all tests pass.
       Every new or modified method MUST satisfy code metrics: method length <= 80 lines (or <= 120 lines if cognitive complexity <= 5),
       cognitive complexity <= 15, and nesting depth <= 4.#{guide_note}
-      4. Scope Containment: Do not refactor unaffected modules or modify external CLI behavior unless required by the report.
+      4. Scope Containment: Do not refactor unaffected modules or modify external CLI behavior unless required by the report.#{oscillation_note}
       Save plan to #{plan_path}, author post-work summary to #{summary_path} (stating issue, status/mitigation, and verification),
       and commit all work when complete.
     PROMPT
@@ -994,6 +1050,31 @@ class MultiProfileReviewCycle
       puts "  ✓ Regression test(s) modified/added: #{test_files.join(', ')}".green
     else
       warn '  ⚠️ Warning: No regression test files modified in this cycle.'.yellow
+    end
+
+    # Test-Weakening & Assertion Atrophy Guard
+    diff_text = `git diff #{base_sha}..HEAD`
+    test_weakening_notices = []
+
+    diff_text.lines.each do |dl|
+      if dl =~ /^\+\s*(?:#\[ignore\]|\bt\.Skip\(|\bskip\s+["']|\bxit\b|\bpending\b)/
+        test_weakening_notices << "Introduced test skip/ignore: #{dl.strip}"
+      end
+    end
+
+    deleted_asserts = diff_text.scan(/^\-\s*(?:assert|expect\(|refute)/).size
+    added_asserts = diff_text.scan(/^\+\s*(?:assert|expect\(|refute)/).size
+    if deleted_asserts > 2 && added_asserts < (deleted_asserts / 2)
+      test_weakening_notices << "Assertion deficit: deleted #{deleted_asserts} assertion(s) but added only #{added_asserts}"
+    end
+
+    if test_weakening_notices.any?
+      puts "\n  ⚠️ Test-Weakening Detected:".bold.yellow
+      test_weakening_notices.each { |w| puts "    • #{w}".yellow }
+      log_write("⚠️ Test-weakening notices: #{test_weakening_notices.join('; ')}\n")
+      if options[:strict_tests]
+        return { aborted: true, reason: "Test-weakening rejected: #{test_weakening_notices.first}" }
+      end
     end
 
     insertions = stat_str[/(\d+)\s+insertion/, 1].to_i
@@ -1440,7 +1521,10 @@ class MultiProfileReviewCycle
 
     return unless options[:push]
 
-    puts "\n==> [Git] Pushing cycle commits to remote...".cyan
+    if options[:batch_commits] && options[:loop]
+      puts '  [Batch Commits] Deferring remote push until loop completion.'.cyan
+      return
+    end
     if system('git', 'push')
       puts 'Successfully pushed commits to remote.'.green
     else
@@ -1643,6 +1727,55 @@ class MultiProfileReviewCycle
       - Transactional rollback on failure: no broken code left on working branch.
       - Mandatory regression test for every remediated defect.
     MARKDOWN
+  end
+
+  def self.run_doctor
+    puts "\e[1m=== Review Cycle Environment Doctor ===\e[0m\n\n"
+    checks = []
+
+    # 1. Ruby runtime
+    ruby_ok = RUBY_VERSION >= '3.0.0'
+    checks << [ruby_ok, "Ruby runtime (v#{RUBY_VERSION})", ruby_ok ? ">= 3.0" : "Requires Ruby >= 3.0"]
+
+    # 2. Git binary
+    git_bin = `which git 2>/dev/null`.strip
+    git_ok = !git_bin.empty?
+    checks << [git_ok, "Git binary (#{git_bin.empty? ? 'missing' : git_bin})", git_ok ? "Available" : "Git not found in PATH"]
+
+    # 3. Git repo context
+    in_repo = system('git rev-parse --is-inside-work-tree >/dev/null 2>&1')
+    checks << [in_repo, "Git repository context", in_repo ? "Valid git repository" : "Not inside a git repository"]
+
+    # 4. bws sandbox tool
+    bws_bin = `which bws 2>/dev/null`.strip
+    bws_ok = !bws_bin.empty?
+    checks << [bws_ok, "bws sandbox tool (#{bws_bin.empty? ? 'missing' : bws_bin})", bws_ok ? "Available" : "Install from https://github.com/sarielhp/bws"]
+
+    # 5. agy-run-wild agent runner
+    agy_bin = `which agy-run-wild 2>/dev/null`.strip
+    agy_ok = !agy_bin.empty?
+    checks << [agy_ok, "agy-run-wild agent runner (#{agy_bin.empty? ? 'missing' : agy_bin})", agy_ok ? "Available" : "Required for autonomous sandbox execution"]
+
+    # 6. Audit tool
+    audit_candidates = [
+      File.join(REPO_ROOT, 'tools', 'audit'),
+      File.join(REPO_ROOT, 'tools', 'audit.rb'),
+      File.expand_path('audit', __dir__),
+      File.expand_path('audit.rb', __dir__),
+      File.join(REPO_ROOT, 'audit'),
+      `which audit 2>/dev/null`.strip
+    ]
+    audit_bin = audit_candidates.find { |f| !f.nil? && !f.empty? && File.exist?(f) }
+    audit_ok = !audit_bin.nil?
+    checks << [audit_ok, "Audit executable (#{audit_bin || 'missing'})", audit_ok ? "Available" : "tools/audit not found (symlink from standards/workflow/bin/audit)"]
+
+    checks.each do |ok, label, detail|
+      mark = ok ? "\e[32m✔\e[0m" : "\e[31m✗\e[0m"
+      puts format("  %s \e[1m%-35s\e[0m %s", mark, label, detail)
+    end
+
+    all_ok = checks.all?(&:first)
+    puts "\n" + (all_ok ? "\e[32mAll prerequisites met! Review cycle engine ready.\e[0m\n" : "\e[33mSome prerequisites are missing. Address notices above before running full cycles.\e[0m\n")
   end
 end
 
