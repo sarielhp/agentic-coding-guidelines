@@ -93,9 +93,29 @@ Ruby strings are mutable objects by default. In hot loops or large parsers:
 - `str << chunk` mutates the existing buffer in-place without heap reallocations.
 - `# frozen_string_literal: true` ensures identical string literals share a single deduplicated object across the entire runtime.
 
+### D. Block Control-Flow Boundaries: Non-Local Jumps
+In Ruby, blocks are closures that retain lexical binding to their enclosing method:
+- Executing `return` inside an enumerable block (`items.each { |x| return if x.done? }`) does **not** return from the block—it executes a **non-local jump**, immediately terminating the enclosing method!
+- If the block is stored in a Proc and executed after the enclosing method has already returned, it raises `LocalJumpError: unexpected return`.
+- Using `next` properly returns a value from the block scope (behaving like `continue` in a loop).
+- `lambda` enforces arity checks and treats `return` locally, whereas `Proc.new` permits non-local jumps and lenient arity. Agents must never substitute `return` for `next` inside iterators.
+
+### E. Truthiness: The Semantic Divergence from Python and JavaScript
+In Python and JavaScript, `0`, `""`, and `[]` are falsy. In Ruby, **only `nil` and `false` are falsy**.
+When an agent writes `process(data) if data`, it expects `[]` or `{}` to bypass execution. In Ruby, empty collections evaluate to `true`, causing runtime operations on empty structures or silent logic corruption. Explicit presence checks (`.any?`, `!empty?`, `.positive?`) are required.
+
+### F. Hash Default Value Mutation Hazard
+Writing `Hash.new([])` passes an object reference. Ruby does not instantiate a new array for each missing key; it returns that exact same array reference for every missing key. When code mutates it via `hash[key] << item`, it mutates the shared default object. The block form `Hash.new { |h, k| h[k] = [] }` guarantees dynamic per-key instantiation.
+
+### G. Metaprogramming & Monkey Patching Invisibility
+While reopening classes (`class String; ... end`) is a hallmark of Ruby flexibility, in autonomous agent workflows it is toxic:
+1. **AST Invisibility**: Static analysis tools (`ruby-audit`, `rubocop`) cannot reliably trace dynamic monkey patches or `class_eval` definitions across separate files.
+2. **Action at a Distance**: Reopening core classes pollutes all dependencies and gems loaded in the VM process.
+3. **Refinements as the Safe Alternative**: If custom syntax convenience is needed, Refinements (`refine` / `using`) restrict modifications strictly to the lexical file scope where they are activated.
+
 ---
 
-## 5. Summary Matrix: Anti-Decomposition Rules
+## 5. Summary Matrix: Anti-Decomposition & Ruby Trap Rules
 
 | Anti-Pattern | Why Agents Do It | The Mandated Solution |
 |---|---|---|
@@ -103,3 +123,8 @@ Ruby strings are mutable objects by default. In hot loops or large parsers:
 | **Parameter Dumping** ($>4$ arguments) | Slicing methods with shared local state | Keep logic unified or extract an immutable value object/struct. |
 | **`rescue nil` Shielding** | Masking state bugs introduced by decomposition | Remove artificial boundaries; allow invariants to fail fast with descriptive messages. |
 | **`rescue Exception`** | Catching "everything" defensively | Rescue only `StandardError`; permit signals and process exits to propagate cleanly. |
+| **Non-Local `return` in Blocks** | Treating blocks like Python/JS loop bodies | Use `next` to skip iterations; reserve `return` strictly for method-level early exits. |
+| **Truthiness Punning (`if items`)** | Assuming empty collection/0 is falsy | Use explicit predicates (`items.any?`, `count.positive?`). |
+| **`Hash.new([])` Mutation** | Unaware of shared reference binding | Use block constructor: `Hash.new { |h, k| h[k] = [] }`. |
+| **Global Core Monkey Patching** | Adding quick string/array convenience helpers | Encapsulate in utility modules (`StringUtils`) or use file-scoped Refinements. |
+| **String Key vs Symbol Miss** | Mixing up hash key representations | Standardize keys at parsing (`symbolize_names: true`) and use `.fetch(:key)`. |

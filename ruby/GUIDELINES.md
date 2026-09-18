@@ -67,6 +67,38 @@ Rather than a blanket line limit, method thresholds are tiered by architectural 
 - **String Mutation in Hot Loops**: Use in-place string mutation (`str << chunk`) or array joins (`chunks.join`) instead of repeated heap allocations with `str += chunk`.
 - **Precompiled Regexp**: Define regular expressions as frozen constants or compile them once. Use the `/o` flag if interpolating once in inner loops.
 
+### Ruby-Specific Gotchas & Agent Traps
+- **The Truthiness Trap (`0`, `""`, `[]` are Truthy)**:
+  - In Ruby, only `nil` and `false` are falsy. Integer `0`, empty strings `""`, and empty collections `[]` evaluate to `true`.
+  - Never write `if items` or `unless count` expecting falsiness on empty/zero. Use explicit presence predicates:
+    - Collections: `items.any?` or `!items.empty?`
+    - Integers/Floats: `count.positive?` or `count > 0`
+    - Strings: `!str.empty?` or `str.strip.empty?`
+- **Block Control Flow: Non-Local `return` vs. `next`**:
+  - `return` inside a block returns from the **enclosing method**, not the block.
+  - Never use `return` inside `.each`, `.map`, or iteration blocks unless an immediate abort of the entire caller method is explicitly intended.
+  - Always use `next` to skip to the next iteration (equivalent to loop `continue`), and `break` to terminate iteration early.
+- **The `Hash.new(default)` Shared Mutable Object Hazard**:
+  - `Hash.new([])` or `Hash.new({})` binds a single shared object across all missing keys. Mutating it (`h[k] << v`) corrupts the default object for all keys.
+  - Always use the block constructor for mutable defaults: `Hash.new { |h, k| h[k] = [] }`.
+- **Hash Key Type Incoherence (Symbol vs. String) & Nil Punning**:
+  - Ruby standard hashes treat `:foo` and `"foo"` as distinct keys. Missing keys return `nil` silently, masking bugs until downstream execution.
+  - Standardize key types upon parsing (`JSON.parse(str, symbolize_names: true)`).
+  - Use `hash.fetch(:key)` when values are mandatory to enforce fail-fast behavior.
+- **Ruby 3 Keyword Arguments (`kwargs`) Separation**:
+  - Ruby 3.0+ strictly separates positional hashes from keyword arguments.
+  - When passing a hash to a method expecting keyword arguments, explicitly splat with double-splat: `method(**options)`.
+- **Ban on Global Core Class Pollution (Monkey Patching)**:
+  - Never reopen standard library or core classes globally (`class String`, `class Array`).
+  - Encapsulate helpers in pure utility modules (`StringUtils.sanitize(str)`).
+  - If syntax extension is strictly necessary, scope it using **Refinements** (`refine String do ... end` + `using ...`) to isolate modifications to the current file.
+- **Deep Freezing of Constants**:
+  - Calling `.freeze` on an Array or Hash is shallow: internal elements remain mutable.
+  - Freeze nested arrays, strings, and hashes, or define immutable frozen structures.
+- **Binary vs. UTF-8 Stream Encoding**:
+  - Standard `File.read` assumes UTF-8 text encoding. Reading binary artifacts (PDFs, images, compressed bundles) with `File.read` causes `ArgumentError: invalid byte sequence in UTF-8`.
+  - Always use `File.binread`, `File.binwrite`, or open with binary mode `'rb'` when handling binary files.
+
 ---
 
 ## 5. Anti-Decomposition Rules for Agents
