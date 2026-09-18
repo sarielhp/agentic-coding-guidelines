@@ -319,10 +319,10 @@ class MultiProfileReviewCycle
             handle_clean_audit(review_num, active_profile, model_step, review_content: review_content)
             break if loop_converged?(clean_profiles, active_profile)
           else
-            proceed = handle_defect_audit(review_num, active_profile, model_step, findings, review_content)
+            proceed = handle_defect_audit(review_num, active_profile, model_step, findings, review_content,
+                                          p_idx: p_cand_idx, c_idx: c_cand_idx)
             if proceed
               clean_profiles << active_profile
-              advance_state(p_cand_idx, c_cand_idx)
               break if loop_converged?(clean_profiles, active_profile)
             else
               clean_profiles.delete(active_profile)
@@ -386,7 +386,7 @@ class MultiProfileReviewCycle
     end
   end
 
-  def handle_defect_audit(review_num, active_profile, model_step, findings, review_content)
+  def handle_defect_audit(review_num, active_profile, model_step, findings, review_content, p_idx: nil, c_idx: nil)
     puts "\n==> Found #{findings} defect(s). Generating #{reports_dir}/#{review_num}_#{active_profile}.md...".yellow
     save_review_report(review_num, active_profile, model_step, review_content)
 
@@ -428,8 +428,10 @@ class MultiProfileReviewCycle
 
       if footprint[:false_positive]
         puts "\nℹ️ Zero code changes detected: remediation agent triaged findings as false positives.".cyan
+        advance_state(p_idx, c_idx)
         archive_artifacts(review_num) unless options[:keep_reviews]
         record_history(review_num, active_profile, model_step, findings, 'false_positive_triage', files_edited: 0)
+        commit_and_push_cycle(review_num, active_profile, clean: true)
         print_bottom_summary(
           num: review_num, profile: active_profile, model_step: model_step,
           findings: findings, review_content: review_content, footprint: footprint, outcome: 'false_positive_triage'
@@ -461,6 +463,7 @@ class MultiProfileReviewCycle
         summary_content = generate_post_work_summary(review_num, active_profile, model_step, findings,
                                                       footprint: footprint, diff_audit: verification)
         output_summary(review_num, summary_content)
+        advance_state(p_idx, c_idx)
         archive_artifacts(review_num) unless options[:keep_reviews]
         record_history(review_num, active_profile, model_step, findings, 'remediated',
                        files_edited: footprint[:files]&.size)
