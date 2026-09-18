@@ -301,7 +301,8 @@ class MultiProfileReviewCycle
       end
 
       cycle_count = 0
-      clean_profiles = Set.new
+      verified_clean_profiles = Set.new
+      debt_profiles = Set.new
 
       loop do
         cycle_count += 1
@@ -319,18 +320,33 @@ class MultiProfileReviewCycle
           findings, review_content = run_audit(active_profile, model_step)
 
           if findings.zero?
-            clean_profiles << active_profile
+            verified_clean_profiles << active_profile
+            debt_profiles.delete(active_profile)
             advance_state(p_cand_idx, c_cand_idx)
             handle_clean_audit(review_num, active_profile, model_step, review_content: review_content)
-            break if loop_converged?(clean_profiles, active_profile)
+            break if loop_converged?(verified_clean_profiles, debt_profiles, active_profile)
           else
-            proceed = handle_defect_audit(review_num, active_profile, model_step, findings, review_content,
+            result = handle_defect_audit(review_num, active_profile, model_step, findings, review_content,
                                           p_idx: p_cand_idx, c_idx: c_cand_idx)
-            if proceed
-              clean_profiles << active_profile
-              break if loop_converged?(clean_profiles, active_profile)
+            outcome = result.is_a?(Hash) ? result[:outcome] : (result ? :remediated : :failed)
+
+            case outcome
+            when :remediated
+              verified_clean_profiles << active_profile
+              debt_profiles.delete(active_profile)
+              break if loop_converged?(verified_clean_profiles, debt_profiles, active_profile)
+            when :false_positive_triage
+              debt_profiles << active_profile
+              verified_clean_profiles.delete(active_profile)
+            when :partial_remediation
+              debt_profiles << active_profile
+              verified_clean_profiles.delete(active_profile)
+              if result[:severities] && (result[:severities]['severe'] || 0).positive?
+                puts "\n🛑 Halting review loop: profile [#{active_profile}] completed with open CRITICAL defects.".bold.red
+                break
+              end
             else
-              clean_profiles.delete(active_profile)
+              verified_clean_profiles.delete(active_profile)
               break
             end
           end
@@ -342,12 +358,16 @@ class MultiProfileReviewCycle
         break if cycle_limit_reached?(cycle_count)
       end
 
-      print_loop_summary(cycle_count, clean_profiles) if options[:loop] && cycle_count > 1
+      print_loop_summary(cycle_count, verified_clean_profiles, debt_profiles) if options[:loop] && cycle_count > 1
 
       if options[:batch_commits] && options[:loop] && options[:push]
-        puts "\n==> [Git] Pushing all batched review loop commits to remote...".bold.cyan
-        curr_branch = `git rev-parse --abbrev-ref HEAD`.strip
-        system('git', 'push', '--set-upstream', 'origin', curr_branch)
+        if debt_profiles.any?
+          puts "\n⚠️ [Git] Skipping remote push: loop ended with unsettled debt profiles (#{debt_profiles.to_a.join(', ')}).".bold.yellow
+        else
+          puts "\n==> [Git] Pushing all batched review loop commits to remote...".bold.cyan
+          curr_branch = `git rev-parse --abbrev-ref HEAD`.strip
+          system('git', 'push', '--set-upstream', 'origin', curr_branch)
+        end
       end
     end
   end
@@ -368,15 +388,26 @@ class MultiProfileReviewCycle
     )
   end
 
-  def loop_converged?(clean_profiles, active_profile)
+  def loop_converged?(clean_profiles, debt_profiles, active_profile)
     return false unless options[:loop]
 
-    if %w[auto random].include?(options[:profile]) && clean_profiles.size >= AUDIT_PROFILES.size
-      puts "\n🌟 COMPLETE CONVERGENCE: All #{AUDIT_PROFILES.size} audit profiles passed with 0 defects!".bold.green
-      true
-    elsif !%w[auto random].include?(options[:profile]) && clean_profiles.include?(active_profile)
-      puts "\n🌟 Profile [#{active_profile}] verified clean with 0 defects!".bold.green
-      true
+    if %w[auto random].include?(options[:profile])
+      if clean_profiles.size >= AUDIT_PROFILES.size && debt_profiles.empty?
+        puts "\n🌟 COMPLETE CONVERGENCE: All #{AUDIT_PROFILES.size} audit profiles passed with 0 defects!".bold.green
+        true
+      elsif clean_profiles.size + debt_profiles.size >= AUDIT_PROFILES.size
+        puts "\n⚠️ Loop completed full rotation, but #{debt_profiles.size} profile(s) have unsettled debt: #{debt_profiles.to_a.join(', ')}.".bold.yellow
+        true
+      else
+        false
+      end
+    elsif !%w[auto random].include?(options[:profile])
+      if clean_profiles.include?(active_profile)
+        puts "\n🌟 Profile [#{active_profile}] verified clean with 0 defects!".bold.green
+        true
+      else
+        false
+      end
     else
       false
     end
@@ -401,10 +432,11 @@ class MultiProfileReviewCycle
         num: review_num, profile: active_profile, model_step: model_step,
         findings: findings, review_content: review_content, footprint: nil, outcome: 'dry_run'
       )
-      return false
+      return { success: false, outcome: :dry_run, remaining: findings }
     end
 
     report_path = File.join(reports_dir, "#{review_num}_#{active_profile}.md")
+    plan_path = File.join(reports_dir, "#{review_num}_#{active_profile}_plan.md")
     base_sha = `git rev-parse HEAD`.strip
     last_ratchet_sha = base_sha
     last_ratchet_footprint = nil
@@ -429,10 +461,10 @@ class MultiProfileReviewCycle
           num: review_num, profile: active_profile, model_step: model_step,
           findings: findings, review_content: review_content, footprint: nil, outcome: 'failed_sandbox'
         )
-        return false
+        return { success: false, outcome: :failed_sandbox, remaining: findings }
       end
 
-      footprint = check_diff_footprint(base_sha, findings: findings)
+      footprint = check_diff_footprint(base_sha, attempt_base_sha: last_ratchet_sha, findings: findings, plan_path: plan_path)
       if footprint[:aborted]
         if last_ratchet_sha != base_sha
           puts "\n⚠️ Diff limit exceeded on attempt #{attempt}. Restoring latest ratchet point...".yellow
@@ -446,20 +478,20 @@ class MultiProfileReviewCycle
           num: review_num, profile: active_profile, model_step: model_step,
           findings: findings, review_content: review_content, footprint: nil, outcome: 'rejected_diff'
         )
-        return false
+        return { success: false, outcome: :rejected_diff, remaining: findings }
       end
 
       if footprint[:false_positive]
-        puts "\nℹ️ Zero code changes detected: remediation agent triaged findings as false positives.".cyan
+        puts "\nℹ️ Zero code changes detected: remediation agent triaged findings as false positives with documented rationale.".cyan
         advance_state(p_idx, c_idx)
         archive_artifacts(review_num) unless options[:keep_reviews]
         record_history(review_num, active_profile, model_step, findings, 'false_positive_triage', files_edited: 0)
-        commit_and_push_cycle(review_num, active_profile, clean: true)
+        commit_and_push_cycle(review_num, active_profile, clean: false, push_override: false)
         print_bottom_summary(
           num: review_num, profile: active_profile, model_step: model_step,
           findings: findings, review_content: review_content, footprint: footprint, outcome: 'false_positive_triage'
         )
-        return true
+        return { success: true, outcome: :false_positive_triage, remaining: 0 }
       end
 
       unless verify_quality_gate
@@ -475,7 +507,7 @@ class MultiProfileReviewCycle
           num: review_num, profile: active_profile, model_step: model_step,
           findings: findings, review_content: review_content, footprint: nil, outcome: 'failed_gate'
         )
-        return false
+        return { success: false, outcome: :failed_gate, remaining: findings }
       end
 
       reinstall_binary
@@ -503,14 +535,16 @@ class MultiProfileReviewCycle
           num: review_num, profile: active_profile, model_step: model_step,
           findings: findings, review_content: review_content, footprint: footprint, outcome: 'remediated'
         )
-        return true
+        return { success: true, outcome: :remediated, remaining: 0 }
       end
 
       # Progressive Monotonic Ratchet evaluation:
       remaining = verification[:remaining]
       has_regressions = verification[:has_new_regressions]
       current_severities = verification[:severities] || parse_unresolved_severities(verification[:output], verification[:unresolved])
-      made_progress = !has_regressions && evaluate_lexicographical_progress(last_severities, current_severities, last_remaining, remaining)
+      cmp = severity_vector(current_severities) <=> severity_vector(last_severities)
+      has_escalation = (cmp == 1)
+      made_progress = !has_regressions && !has_escalation && evaluate_lexicographical_progress(last_severities, current_severities, last_remaining, remaining)
 
       if made_progress
         last_remaining = remaining
@@ -518,8 +552,9 @@ class MultiProfileReviewCycle
         last_ratchet_sha = `git rev-parse HEAD`.strip
         last_ratchet_footprint = footprint
         puts "\n📈 Progressive Ratchet: Reduced open defects to #{remaining}/#{findings} with 0 regressions.".bold.green
-      elsif has_regressions
-        puts "\n⚠️ Attempt #{attempt} introduced regressions. Discarding changes and restoring ratchet point...".bold.red
+      elsif has_regressions || has_escalation
+        escalation_reason = has_escalation ? 'escalated severity (higher tier defect count increased)' : 'introduced regressions'
+        puts "\n⚠️ Attempt #{attempt} #{escalation_reason}. Discarding changes and restoring ratchet point...".bold.red
         restore_ratchet_point(last_ratchet_sha)
       else
         puts "\n⚠️ Attempt #{attempt} made no progress on highest priority open tier (#{remaining} remaining). Discarding attempt...".yellow
@@ -541,7 +576,7 @@ class MultiProfileReviewCycle
           num: review_num, profile: active_profile, model_step: model_step,
           findings: findings, review_content: review_content, footprint: footprint, outcome: 'blocked'
         )
-        return false
+        return { success: false, outcome: :blocked, remaining: findings }
       end
 
       warn_msg = "\n⚠️ Targeted verification not yet converged (attempt #{attempt - 1}/#{max_attempts}). Re-attempting remediation with laser-focused feedback..."
@@ -551,9 +586,76 @@ class MultiProfileReviewCycle
     end
   end
 
+  def git!(*args)
+    success = system('git', *args)
+    unless success
+      err = $?.exitstatus || 1
+      raise "Git command failed (exit #{err}): git #{args.join(' ')}"
+    end
+    success
+  end
+
+  def capture_initial_untracked
+    @initial_untracked_files ||= `git status --porcelain -uall`.lines
+                                 .select { |l| l.start_with?('??') }
+                                 .map { |l| l[3..-1].strip }
+  end
+
+  def repo_root
+    @repo_root ||= begin
+      git_root = `git rev-parse --show-toplevel 2>/dev/null`.strip
+      git_root.empty? ? REPO_ROOT : git_root
+    end
+  end
+
+  def clean_untracked_changes
+    root = repo_root
+    current_untracked = `git status --porcelain -uall`.lines
+                        .select { |l| l.start_with?('??') }
+                        .map { |l| l[3..-1].strip }
+    new_untracked = current_untracked - (@initial_untracked_files || [])
+    new_untracked.each do |f|
+      target = File.expand_path(f, root)
+      next unless target.start_with?(root)
+      FileUtils.rm_rf(target) if File.exist?(target)
+    end
+  end
+
+  def take_pre_run_safety_snapshot
+    capture_initial_untracked
+    temp_index = `mktemp -t review_cycle_index.XXXXXX 2>/dev/null`.strip
+    return nil if temp_index.empty?
+
+    begin
+      env = { 'GIT_INDEX_FILE' => temp_index }
+      head_sha = `git rev-parse HEAD 2>/dev/null`.strip
+      system(env, 'git', 'read-tree', head_sha) unless head_sha.empty?
+      system(env, 'git', 'add', '-A')
+
+      tree = Open3.capture2(env, 'git', 'write-tree').first.strip
+      return nil if tree.empty?
+
+      msg = "review_cycle safety snapshot at #{Time.now.iso8601}"
+      commit_cmd = head_sha.empty? ? ['git', 'commit-tree', tree, '-m', msg] : ['git', 'commit-tree', tree, '-p', head_sha, '-m', msg]
+      commit = Open3.capture2(*commit_cmd).first.strip
+      return nil if commit.empty?
+
+      ref = "refs/review/safety/#{Time.now.to_i}_#{$$}"
+      git!('update-ref', ref, commit)
+      @safety_ref = ref
+      puts "  🛡️ [Safety Snapshot] Captured full workspace state at #{ref}".cyan
+      ref
+    ensure
+      FileUtils.rm_f(temp_index)
+    end
+  rescue => e
+    warn "⚠️ Warning: Could not create safety snapshot: #{e.message}".yellow
+    nil
+  end
+
   def restore_ratchet_point(sha)
-    system('git', 'reset', '--hard', sha)
-    system('git', 'clean', '-fd')
+    git!('reset', '--hard', sha)
+    clean_untracked_changes
   end
 
   def handle_partial_remediation(num, profile, model_step, total_findings, remaining_findings,
@@ -572,30 +674,29 @@ class MultiProfileReviewCycle
     record_history(num, profile, model_step, total_findings, 'partial_remediation',
                    files_edited: footprint ? footprint[:files]&.size : 0,
                    remaining: remaining_findings)
-    commit_and_push_cycle(num, profile)
+    commit_and_push_cycle(num, profile, clean: false, push_override: false)
 
     puts "\n✅ Review Cycle #{num} (#{profile}) partial progress committed and archived.".bold.yellow
     print_bottom_summary(
       num: num, profile: profile, model_step: model_step,
       findings: total_findings, review_content: nil, footprint: footprint, outcome: 'partial_remediation'
     )
-    true
+    { success: true, outcome: :partial_remediation, remaining: remaining_findings, severities: (diff_audit ? diff_audit[:severities] : {}) }
   end
 
   def parse_unresolved_severities(verification_output, unresolved_text)
     counts = { 'severe' => 0, 'major' => 0, 'medium' => 0, 'minor' => 0, 'other' => 0 }
     if verification_output =~ /\[UNRESOLVED SEVERITIES\]:\s*([^\n]+)/i
       line = $1.strip
-      if line !~ /none|0\s+unresolved|clean/i
-        counts['severe'] += $1.to_i if line =~ /crit(?:ical)?:\s*(\d+)/i
-        counts['major']  += $1.to_i if line =~ /maj(?:or)?:\s*(\d+)/i
-        counts['medium'] += $1.to_i if line =~ /mod(?:erate)?:\s*(\d+)/i || line =~ /med(?:ium)?:\s*(\d+)/i
-        counts['minor']  += $1.to_i if line =~ /min(?:or)?:\s*(\d+)/i
-      end
+      counts['severe'] += $1.to_i if line =~ /crit(?:ical)?:\s*(\d+)/i
+      counts['major']  += $1.to_i if line =~ /maj(?:or)?:\s*(\d+)/i
+      counts['medium'] += $1.to_i if line =~ /mod(?:erate)?:\s*(\d+)/i || line =~ /med(?:ium)?:\s*(\d+)/i
+      counts['minor']  += $1.to_i if line =~ /min(?:or)?:\s*(\d+)/i
+      counts['other']  += $1.to_i if line =~ /other:\s*(\d+)/i
       return counts if counts.values.sum.positive?
     end
 
-    if unresolved_text && !unresolved_text.empty?
+    if unresolved_text && !unresolved_text.empty? && unresolved_text !~ /\A(?:none|0\s+unresolved|clean)\b/i
       breakdown = extract_severity_breakdown(unresolved_text)
       return breakdown if breakdown.values.sum.positive?
     end
@@ -603,20 +704,26 @@ class MultiProfileReviewCycle
     counts
   end
 
+  SEVERITY_ORDER = %w[severe major medium minor other].freeze
+
+  def severity_vector(breakdown)
+    return [0, 0, 0, 0, 0] if breakdown.nil?
+
+    SEVERITY_ORDER.map { |t| (breakdown[t.to_s] || 0).to_i }
+  end
+
   def evaluate_lexicographical_progress(old_breakdown, new_breakdown, old_remaining, new_remaining)
-    return false if new_remaining >= old_remaining
+    old_vec = severity_vector(old_breakdown)
+    new_vec = severity_vector(new_breakdown)
 
-    [:severe, :major, :medium, :minor, :other].each do |tier|
-      old_count = old_breakdown[tier.to_s] || 0
-      new_count = new_breakdown[tier.to_s] || 0
-      next if old_count.zero? && new_count.zero?
-
-      if old_count.positive?
-        return new_count < old_count
-      end
+    cmp = new_vec <=> old_vec
+    if cmp == -1
+      true
+    elsif cmp == 0
+      new_remaining < old_remaining
+    else
+      false
     end
-
-    new_remaining < old_remaining
   end
 
   def build_ratchet_feedback(verification, attempt, severities = {})
@@ -693,10 +800,10 @@ class MultiProfileReviewCycle
 
     msg = "\n⚠️ [Rollback] #{reason}. Reverting workspace to #{base_sha[0..8]}..."
     puts msg.bold.red
-    log_write("#{msg}\n")
-    system('git', 'reset', '--hard', base_sha)
-    system('git', 'clean', '-fd')
+    git!('reset', '--hard', base_sha)
+    clean_untracked_changes
     done_msg = "Workspace rolled back cleanly to #{base_sha[0..8]}."
+    done_msg += " (Safety ref: #{@safety_ref})" if @safety_ref
     puts done_msg.yellow
     log_write("#{done_msg}\n")
   end
@@ -878,7 +985,7 @@ class MultiProfileReviewCycle
       File.expand_path('build_local.rb', __dir__),
       File.expand_path('install', __dir__)
     ]
-    candidate = build_candidates.find { |p| safe_install_script?(p) || (File.file?(p) && File.executable?(p)) }
+    candidate = build_candidates.find { |p| safe_install_script?(p) }
     return candidate.end_with?('.rb') && !File.executable?(candidate) ? "ruby #{candidate}" : candidate if candidate
 
     makefile = File.join(REPO_ROOT, 'Makefile')
@@ -1032,11 +1139,14 @@ class MultiProfileReviewCycle
   end
 
   def preflight_check
+    take_pre_run_safety_snapshot
+    system('git', 'worktree', 'prune')
+
     status = `git status --porcelain`.strip
     unless status.empty?
       puts '==> Checkpointing uncommitted tracked changes before review cycle...'.yellow
-      system('git', 'add', '-u')
-      system('git', 'commit', '--no-verify', '-m', 'wip: pre-review-cycle checkpoint')
+      git!('add', '-u')
+      git!('commit', '--no-verify', '-m', 'wip: pre-review-cycle checkpoint')
     end
 
     verify_auditor_version
@@ -1187,8 +1297,8 @@ class MultiProfileReviewCycle
     File.write(report_path, content)
     log_write("--> Saved review report: #{report_path}\n")
     unless options[:dry_run]
-      system('git', 'add', report_path, state_file_path)
-      system('git', 'commit', '-m', "docs: add code review report #{num} (#{profile} via #{model_step[:label]})")
+      git!('add', report_path, state_file_path)
+      git!('commit', '-m', "docs: add code review report #{num} (#{profile} via #{model_step[:label]})")
       log_write("--> Committed review report and #{state_file_path}\n")
     end
   end
@@ -1246,8 +1356,8 @@ class MultiProfileReviewCycle
   end
 
   def remediate_in_sandbox(num, profile, feedback: nil, attempt: 1)
-    branch = "fix-review-#{num}-#{profile}-remediation"
-    branch += "-try#{attempt}" if attempt > 1
+    run_nonce = @run_nonce ||= Time.now.strftime('%H%M%S')
+    branch = "fix-review-#{num}-#{profile}-#{run_nonce}-try#{attempt}"
     plan_path = "#{reports_dir}/#{num}_#{profile}_plan.md"
     report_path = "#{reports_dir}/#{num}_#{profile}.md"
     summary_path = "#{reports_dir}/#{num}_summary.md"
@@ -1324,22 +1434,41 @@ class MultiProfileReviewCycle
     status&.success? || false
   end
 
-  def check_diff_footprint(base_sha, findings: 0)
+  def check_diff_footprint(base_sha, attempt_base_sha: nil, findings: 0, plan_path: nil)
     stat_str = `git diff --shortstat #{base_sha}..HEAD`.strip
     file_list = `git diff --name-only #{base_sha}..HEAD`.lines.map(&:strip).reject(&:empty?)
 
-    puts "\n==> Inspecting Remediation Footprint...".cyan
-    puts "  Files modified: #{file_list.size} file(s)"
-    puts "  Diff stat: #{stat_str.empty? ? 'No changes' : stat_str}"
+    attempt_base = attempt_base_sha || base_sha
+    attempt_stat_str = (attempt_base == base_sha) ? stat_str : `git diff --shortstat #{attempt_base}..HEAD`.strip
+    attempt_file_list = (attempt_base == base_sha) ? file_list : `git diff --name-only #{attempt_base}..HEAD`.lines.map(&:strip).reject(&:empty?)
 
-    if file_list.empty? || stat_str.empty?
-      return { aborted: false, files: [], total_lines: 0, test_files: [], stat: 'No changes', false_positive: true }
+    puts "\n==> Inspecting Remediation Footprint...".cyan
+    puts "  Files modified (cumulative): #{file_list.size} file(s)"
+    puts "  Diff stat (cumulative): #{stat_str.empty? ? 'No changes' : stat_str}"
+    if attempt_base != base_sha
+      puts "  Files modified (attempt): #{attempt_file_list.size} file(s)"
+      puts "  Diff stat (attempt): #{attempt_stat_str.empty? ? 'No changes' : attempt_stat_str}"
     end
 
-    diff_text = `git diff #{base_sha}..HEAD`
+    if attempt_file_list.empty? || attempt_stat_str.empty?
+      has_triage_rationale = false
+      if plan_path && File.exist?(plan_path)
+        plan_text = File.read(plan_path)
+        has_triage_rationale = plan_text.match?(/(?:false[\s_-]positive|triaged?|intentional[\s_-]design|not[\s_-]a[\s_-]bug)/i) &&
+                               plan_text.length > 120
+      end
+
+      if has_triage_rationale
+        return { aborted: false, files: [], total_lines: 0, test_files: [], stat: 'No changes', false_positive: true }
+      else
+        return { aborted: true, reason: 'Sandbox produced no code changes and no valid plan.md triage rationale was found.' }
+      end
+    end
+
+    attempt_diff_text = `git diff #{attempt_base}..HEAD`
     lang = detect_project_language
 
-    test_files = file_list.select do |f|
+    test_files = attempt_file_list.select do |f|
       case lang
       when :go
         f.end_with?('_test.go')
@@ -1355,25 +1484,25 @@ class MultiProfileReviewCycle
     inline_tests = false
     case lang
     when :rust
-      inline_tests = diff_text.lines.any? { |l| l =~ /^\+\s*(?:#\[cfg\(test\)\]|#\[test\])/ }
+      inline_tests = attempt_diff_text.lines.any? { |l| l =~ /^\+\s*(?:#\[cfg\(test\)\]|#\[test\])/ }
     when :ruby
-      inline_tests = diff_text.lines.any? { |l| l =~ /^\+\s*(?:def\s+test_|it\s+["']|describe\s+["'])/ }
+      inline_tests = attempt_diff_text.lines.any? { |l| l =~ /^\+\s*(?:def\s+test_|it\s+["']|describe\s+["'])/ }
     when :go
-      inline_tests = diff_text.lines.any? { |l| l =~ /^\+\s*func\s+Test[A-Z]/ }
+      inline_tests = attempt_diff_text.lines.any? { |l| l =~ /^\+\s*func\s+Test[A-Z]/ }
     end
 
     if test_files.any? || inline_tests
       test_desc = test_files.any? ? test_files.join(', ') : 'Inline test module/cases in diff'
       puts "  ✓ Regression test(s) modified/added: #{test_desc}".green
     else
-      msg = 'No regression test files or test blocks modified in this cycle.'
+      msg = 'No regression test files or test blocks modified in this attempt.'
       warn "  ⚠️ Warning: #{msg}".yellow
       if options[:strict_tests] || findings.to_i > 0
         return { aborted: true, reason: "Remediation rejected: #{msg} (automated regression tests are mandatory for reported findings)" }
       end
     end
 
-    # Test-Weakening & Assertion Atrophy Guard
+    # Test-Weakening & Assertion Atrophy Guard evaluated on attempt diff
     test_weakening_notices = []
     skip_pattern = case lang
                    when :go   then /^\+\s*\bt\.(?:Skip|Skipf|SkipNow)\(/
@@ -1382,7 +1511,7 @@ class MultiProfileReviewCycle
                    else /^\+\s*(?:#\[ignore\]|\bt\.Skip\(|\bskip\b)/
                    end
 
-    diff_text.lines.each do |dl|
+    attempt_diff_text.lines.each do |dl|
       if dl =~ skip_pattern
         test_weakening_notices << "Introduced test skip/ignore: #{dl.strip}"
       end
@@ -1395,8 +1524,8 @@ class MultiProfileReviewCycle
                      else /(?:assert|expect|refute)/
                      end
 
-    deleted_asserts = diff_text.lines.select { |l| l =~ /^\-\s*#{assert_pattern}/ }.size
-    added_asserts = diff_text.lines.select { |l| l =~ /^\+\s*#{assert_pattern}/ }.size
+    deleted_asserts = attempt_diff_text.lines.select { |l| l =~ /^\-\s*#{assert_pattern}/ }.size
+    added_asserts = attempt_diff_text.lines.select { |l| l =~ /^\+\s*#{assert_pattern}/ }.size
     if deleted_asserts > 2 && added_asserts < (deleted_asserts / 2)
       test_weakening_notices << "Assertion deficit: deleted #{deleted_asserts} assertion(s) but added only #{added_asserts}"
     end
@@ -1412,9 +1541,22 @@ class MultiProfileReviewCycle
     deletions = stat_str[/(\d+)\s+deletion/, 1].to_i
     total_lines = insertions + deletions
 
+    attempt_insertions = attempt_stat_str[/(\d+)\s+insertion/, 1].to_i
+    attempt_deletions = attempt_stat_str[/(\d+)\s+deletion/, 1].to_i
+    attempt_total_lines = attempt_insertions + attempt_deletions
+
     max_lines = options[:max_diff_lines] || 800
-    if total_lines > max_lines
-      msg = "Diff footprint (#{total_lines} lines) exceeds threshold (#{max_lines} lines)"
+    if attempt_total_lines > max_lines
+      msg = "Attempt diff footprint (#{attempt_total_lines} lines) exceeds threshold (#{max_lines} lines)"
+      if options[:strict_diff]
+        return { aborted: true, reason: msg }
+      else
+        warn "  ⚠️ Warning: #{msg}.".yellow
+      end
+    end
+
+    if total_lines > (max_lines * 2)
+      msg = "Cumulative diff footprint (#{total_lines} lines) exceeds threshold (#{max_lines * 2} lines)"
       if options[:strict_diff]
         return { aborted: true, reason: msg }
       else
@@ -1428,13 +1570,13 @@ class MultiProfileReviewCycle
   def run_targeted_verification(profile, report_path, base_sha, model_step)
     diff = `git diff #{base_sha}..HEAD`
     if diff.strip.empty?
-      return { passed: true, remaining: 0, output: 'No code changes in diff', details: 'Clean triage' }
+      return { passed: false, remaining: 1, output: 'No code changes in diff to verify', details: 'No code changes in diff', has_new_regressions: false, severities: {} }
     end
 
     audit_bin = resolve_audit_executable
     unless audit_bin
-      warn '  ⚠️ Audit executable not found for targeted verification. Skipping verification pass.'.yellow
-      return { passed: true, remaining: 0, output: 'Auditor missing', details: 'Auditor missing' }
+      warn '  ❌ Audit executable not found for targeted verification. Failing closed.'.bold.red
+      return { passed: false, remaining: 1, output: 'Auditor missing', details: 'Auditor missing', has_new_regressions: false, severities: {} }
     end
 
     puts "\n==> [Phase 4/5] Running Targeted Re-Verification Pass [Lens: #{profile}, #{model_step[:label]}]...".bold.cyan
@@ -1458,8 +1600,13 @@ class MultiProfileReviewCycle
       status = wait_thr.value
     end
 
-    passed = status&.success? || (output =~ /\[VERIFICATION\]:\s*PASSED/i && output !~ /\[VERIFICATION\]:\s*FAILED/i)
-    remaining = output[/\[REMAINING DEFECTS\]:\s*(\d+)/i, 1]&.to_i || (passed ? 0 : 1)
+    explicit_passed = output =~ /\[VERIFICATION\]:\s*PASSED/i && output !~ /\[VERIFICATION\]:\s*FAILED/i
+    explicit_failed = output =~ /\[VERIFICATION\]:\s*FAILED/i
+    passed = status&.success? && explicit_passed && !explicit_failed
+
+    parsed_remaining = output[/\[REMAINING DEFECTS\]:\s*(\d+)/i, 1]&.to_i
+    remaining = parsed_remaining || (passed ? 0 : 1)
+
     details = if passed
                 'All reported findings resolved with 0 regressions.'
               else
@@ -1469,7 +1616,11 @@ class MultiProfileReviewCycle
     resolved_match = output[/\[RESOLVED FINDINGS\]:\s*(.+?)(?=\n\s*\[|\Z)/im, 1]&.strip
     unresolved_match = output[/\[UNRESOLVED FINDINGS\]:\s*(.+?)(?=\n\s*\[|\Z)/im, 1]&.strip
     regressions_match = output[/\[NEW REGRESSIONS\]:\s*(.+?)(?=\n\s*\[|\Z)/im, 1]&.strip
-    has_regressions = regressions_match && regressions_match !~ /none|0\s+new|clean/i
+    has_regressions = if regressions_match
+                        regressions_match.strip !~ /\A(?:none|0\s+new|clean|no\s+new\s+regressions)\b/i
+                      else
+                        !passed
+                      end
     severities = parse_unresolved_severities(output, unresolved_match)
 
     {
@@ -1485,7 +1636,7 @@ class MultiProfileReviewCycle
     }
   rescue StandardError => e
     warn "  ⚠️ Targeted verification error: #{e.message}".yellow
-    { passed: false, remaining: 1, output: e.message, details: e.message, has_new_regressions: false, severities: {} }
+    { passed: false, remaining: 1, output: e.message, details: e.message, has_new_regressions: true, severities: {} }
   end
 
   def verify_quality_gate
@@ -1523,9 +1674,9 @@ class MultiProfileReviewCycle
               end
 
     File.write(summary_path, content)
-    system('git', 'add', summary_path)
+    git!('add', summary_path)
     commit_suffix = partial ? ' (partial)' : ''
-    system('git', 'commit', '-m', "docs: add post-work summary #{num} (#{profile}#{commit_suffix})")
+    git!('commit', '-m', "docs: add post-work summary #{num} (#{profile}#{commit_suffix})")
     content
   end
 
@@ -1700,14 +1851,18 @@ class MultiProfileReviewCycle
     emit_summary_line("#{sep}\n")
   end
 
-  def print_loop_summary(total_cycles, clean_profiles)
+  def print_loop_summary(total_cycles, clean_profiles, debt_profiles = Set.new)
     sep = ('─' * 74).cyan
     puts "\n#{sep}"
     puts " 🏁 REVIEW CYCLE LOOP COMPLETED (#{total_cycles} cycles executed)".bold.cyan
     puts sep
     puts '  • Cycles Executed : '.bold + total_cycles.to_s.yellow
     clean_str = "#{clean_profiles.size}/#{AUDIT_PROFILES.size} (#{clean_profiles.to_a.join(', ')})"
-    puts '  • Clean Profiles  : '.bold + (clean_profiles.size == AUDIT_PROFILES.size ? clean_str.bold.green : clean_str.yellow)
+    puts '  • Clean Profiles  : '.bold + (clean_profiles.size == AUDIT_PROFILES.size && debt_profiles.empty? ? clean_str.bold.green : clean_str.yellow)
+    if debt_profiles.any?
+      debt_str = "#{debt_profiles.size} (#{debt_profiles.to_a.join(', ')})"
+      puts '  • Debt Profiles   : '.bold + debt_str.bold.red
+    end
     puts "#{sep}\n"
   end
 
@@ -1923,15 +2078,16 @@ class MultiProfileReviewCycle
     save_state
   end
 
-  def commit_and_push_cycle(num, profile, clean: false)
+  def commit_and_push_cycle(num, profile, clean: false, push_override: nil)
     dirty = `git status --porcelain #{reports_dir} #{state_file_path}`.strip
     unless dirty.empty?
-      system('git', 'add', reports_dir, state_file_path)
+      git!('add', reports_dir, state_file_path)
       msg = clean ? "chore(review): record clean audit for #{profile}" : "chore(review): finalize cycle #{num} (#{profile}) state"
-      system('git', 'commit', '-m', msg)
+      git!('commit', '-m', msg)
     end
 
-    return unless options[:push]
+    should_push = push_override.nil? ? options[:push] : push_override
+    return unless should_push
 
     if options[:batch_commits] && options[:loop]
       puts '  [Batch Commits] Deferring remote push until loop completion.'.cyan
