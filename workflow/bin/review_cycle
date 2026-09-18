@@ -975,14 +975,14 @@ class MultiProfileReviewCycle
   end
 
   def count_audit_findings(output)
-    findings = output.scan(/\[SEVERITY\]/i).size
-    if findings.zero? && output =~ /no\s+defects|0\s+defects|clean/i
-      0
-    elsif findings.zero? && output =~ /^\s*\d+\.\s*\[SEVERITY\]/i
-      output.scan(/^\s*\d+\.\s*\[SEVERITY\]/i).size
-    else
-      findings
+    return 0 if output.nil? || output.empty?
+
+    if output =~ /NO\s+(?:CRITICAL\s+)?DEFECTS\s+FOUND/i && output.scan(/^\s*\[LOCATION\]:/i).empty?
+      return 0
     end
+
+    breakdown = extract_severity_breakdown(output)
+    breakdown.values.sum
   end
 
   def run_audit(profile, model_step)
@@ -1362,29 +1362,63 @@ class MultiProfileReviewCycle
     puts "\n==> [Phase 4/5] Post-Work Summary authored: #{reports_dir}/#{num}_summary.md".bold.cyan
   end
 
+  def extract_issue_blocks(content)
+    return [] if content.nil? || content.empty?
+
+    sep_regex = /(?=\n\s*(?:\[SEVERITY\]:?|\[(?:CRITICAL|MAJOR|MODERATE|SEVERE|HIGH|MEDIUM|LOW|MINOR)\]|\#{1,4}\s*(?:\d+[\.\)]\s*)?\[(?:CRITICAL|MAJOR|MODERATE|SEVERE|HIGH|MEDIUM|LOW|MINOR)\]))/i
+    raw_blocks = content.split(sep_regex)
+    blocks = raw_blocks.select { |b| b =~ /\[LOCATION\]:/i || b =~ /\[ROOT CAUSE\]:/i }
+    return blocks if blocks.any?
+
+    # If no severity tags at all, split on [LOCATION]:
+    loc_blocks = content.split(/(?=\n\s*\[LOCATION\]:)/i).select { |b| b =~ /\[LOCATION\]:/i }
+    return loc_blocks if loc_blocks.any?
+
+    content.split(/(?=\n\s*\#{2,4}\s+(?:Issue|Finding|\d+[\.\)]))/i).select { |b| b =~ /\[LOCATION\]:/i || b =~ /remediation/i }
+  end
+
+  def extract_block_severity(block)
+    if block =~ /^\s*\[SEVERITY(?::\s*|\s*\]:?\s*)([a-zA-Z]+)/i
+      return $1
+    end
+    if block =~ /^\s*(?:\*\*Severity\*\*|(?<!\[)Severity):\s*([a-zA-Z]+)/i
+      return $1
+    end
+    if block =~ /^\s*(?:\#{1,4}\s*)?(?:\d+[\.\)]\s*)?\[(CRITICAL|MAJOR|MODERATE|SEVERE|HIGH|MEDIUM|LOW|MINOR)\]/i
+      return $1
+    end
+    nil
+  end
+
   def extract_severity_breakdown(review_content)
     counts = { 'severe' => 0, 'major' => 0, 'medium' => 0, 'minor' => 0, 'other' => 0 }
     return counts if review_content.nil? || review_content.empty?
 
-    found = 0
-    review_content.scan(/\[SEVERITY\]:?\s*([a-zA-Z]+)/i).each do |(level)|
-      found += 1
-      categorize_severity(level, counts)
-    end
-
-    if found.zero?
-      heading_regex = /###\s+\d+\.\s*\[(CRITICAL|MAJOR|MODERATE|SEVERE|HIGH|MEDIUM|LOW|MINOR)\]/i
-      review_content.scan(heading_regex).each do |(level)|
-        found += 1
+    blocks = extract_issue_blocks(review_content)
+    if blocks.any?
+      blocks.each do |block|
+        level = extract_block_severity(block)
         categorize_severity(level, counts)
       end
+      return counts
+    end
+
+    # Fallback for freeform/unblocked reviews
+    review_content.scan(/\[SEVERITY(?::\s*|\s*\]:?\s*)([a-zA-Z]+)/i).each do |(level)|
+      categorize_severity(level, counts)
+    end
+    return counts if counts.values.sum.positive?
+
+    bracket_regex = /^\s*(?:\#{1,4}\s*)?(?:\d+[\.\)]\s*)?\[(CRITICAL|MAJOR|MODERATE|SEVERE|HIGH|MEDIUM|LOW|MINOR)\](?:\s*[:\-].*|\s*)$/i
+    review_content.scan(bracket_regex).each do |(level)|
+      categorize_severity(level, counts)
     end
 
     counts
   end
 
   def categorize_severity(level, counts)
-    case level.downcase
+    case (level || '').downcase
     when /crit|sever|block/ then counts['severe'] += 1
     when /maj|high/        then counts['major'] += 1
     when /mod|med/         then counts['medium'] += 1
@@ -1582,7 +1616,7 @@ class MultiProfileReviewCycle
     return [] unless report_file && File.exist?(report_file)
 
     content = File.read(report_file)
-    blocks = content.split(/\[SEVERITY\]:/i)[1..] || []
+    blocks = extract_issue_blocks(content)
     return extract_severity_blocks(blocks) if blocks.any?
 
     extract_markdown_heading_issues(content)

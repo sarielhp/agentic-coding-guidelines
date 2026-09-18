@@ -544,6 +544,8 @@ def developer_prompt(profile_key, profile_info, lang)
     [FAILURE TRACE]: Concrete sequence, input, or conditions required to trigger the bug
     [REMEDIATION]: Minimal, idiomatic code snippet resolving the defect
 
+    Format Rule: Always begin each defect block with "[SEVERITY]: " followed by Critical, Major, or Moderate. Do not omit the "SEVERITY:" prefix.
+
     If no genuine defects exist for this focus area, return: "NO CRITICAL DEFECTS FOUND." Do not manufacture non-issues.
   PROMPT
 end
