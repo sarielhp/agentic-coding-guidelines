@@ -289,6 +289,10 @@ def parse_cli_options
       options[:include_tests] = true
     end
 
+    opts.on('-V', '--verify-remediation REPORT', 'Verify a remediation diff against a prior review report') do |r|
+      options[:verify_report] = r
+    end
+
     opts.on('-l', '--list-profiles', 'List available audit profiles and descriptions') do
       print_profile_list
       exit 0
@@ -544,10 +548,58 @@ def developer_prompt(profile_key, profile_info, lang)
   PROMPT
 end
 
+def verification_developer_prompt(profile_key, profile_info, lang, report_content)
+  lang_label = { go: 'Go', rust: 'Rust', ruby: 'Ruby' }.fetch(lang, 'Systems')
+  lang_invariants = case lang
+                    when :go
+                      'Evaluate concurrency (races, goroutine leaks, sync), nil interface boxing, error wrapping (%w), slice bounds, and resource cleanup (defer).'
+                    when :rust
+                      'Evaluate borrow checker lifetimes, Option/Result unwrap hazards, async cancellation, and memory safety.'
+                    when :ruby
+                      'Evaluate StandardError vs Exception, nil-safety (&.), process execution safety (Open3/Shellwords), and resource cleanup in ensure blocks.'
+                    else
+                      'Evaluate core domain correctness, invariant preservation, and failure modes.'
+                    end
+
+  <<~PROMPT
+    You are a Principal Systems Engineer and #{lang_label} code auditor conducting an objective verification of a remediation patch.
+    Audit Lens: #{profile_info[:name]} (#{profile_key})
+    Language: #{lang_label}
+
+    Context & Invariants:
+    #{lang_invariants}
+
+    PRIOR AUDIT DEFECTS REPORTED:
+    #{report_content}
+
+    YOUR STRICT VERIFICATION MANDATE:
+    You are evaluating ONLY the git diff patch submitted to remediate the above findings.
+    Answer strictly two questions:
+    1. Fix Conformance: Does the patch genuinely and correctly resolve the reported defects?
+    2. Regression Freedom: Does the patch introduce any new Critical or Major defects under the #{profile_key} lens?
+
+    CRITICAL RULES:
+    - Focus strictly on the diff and affected functions.
+    - Do NOT perform an open-ended review of unaffected codebase modules.
+    - Do NOT flag minor stylistic preferences, whitespace, or theoretical non-issues on single-threaded paths.
+    - If a reported defect was legitimately triaged as a false positive or intentional design invariant with clear technical justification in the tests/comments, treat it as resolved.
+
+    REQUIRED VERIFICATION OUTPUT FORMAT:
+    [VERIFICATION]: PASSED or FAILED
+    [REMAINING DEFECTS]: 0 (or integer count of unresolved defects)
+    [RESOLVED FINDINGS]: Summary of findings successfully resolved
+    [UNRESOLVED FINDINGS]: Concrete explanation if any findings remain unfixed
+    [NEW REGRESSIONS]: Concrete explanation if any new Critical/Major bugs were introduced
+
+    If all defects are resolved with no regressions, you MUST output "[VERIFICATION]: PASSED" and "[REMAINING DEFECTS]: 0".
+  PROMPT
+end
+
 def execute_cli_capture(cmd, input_payload)
   stdout, stderr, status = Open3.capture3(*cmd, stdin_data: input_payload)
   if status.success?
     puts stdout
+    stdout
   else
     warn stderr unless stderr.strip.empty?
     exit status.exitstatus || 1
@@ -605,7 +657,9 @@ def audit_via_api(api_key, dev_prompt, input_payload, payload_type, profile_key,
 
   resp = execute_api_post_with_retry(http, req)
   if resp&.is_a?(Net::HTTPSuccess)
-    puts JSON.parse(resp.body).dig('choices', 0, 'message', 'content')
+    content = JSON.parse(resp.body).dig('choices', 0, 'message', 'content')
+    puts content
+    content
   else
     abort resp ? "API Error (#{resp.code}): #{resp.body}" : 'Network error contacting OpenAI API'
   end
@@ -629,7 +683,9 @@ def audit_via_gemini(dev_prompt, input_payload, payload_type, profile_key, _mode
   cmd = ['bws', 'run', '--', 'agy-run-wild', '-p', prompt]
   stdout, stderr, status = Open3.capture3(*cmd)
   if status.success?
-    puts stdout.lines.reject { |l| l =~ /Successfully trusted workspace/ }.join
+    clean_out = stdout.lines.reject { |l| l =~ /Successfully trusted workspace/ }.join
+    puts clean_out
+    clean_out
   else
     warn stderr unless stderr.strip.empty?
     exit status.exitstatus || 1
@@ -644,6 +700,37 @@ def main
   profile_key, profile_info = resolve_profile(opts[:profile], lang)
   backend = resolve_backend(opts[:backend], opts[:tier], profile_key)
   model = resolve_model(backend, opts[:tier], opts[:model])
+
+  if opts[:verify_report]
+    unless File.file?(opts[:verify_report])
+      abort "Error: Verification report file not found: #{opts[:verify_report]}"
+    end
+
+    report_content = File.read(opts[:verify_report])
+    diff_payload = if $stdin.stat.pipe?
+                     $stdin.read
+                   elsif opts[:target] && !opts[:target].empty? && File.file?(opts[:target].first)
+                     File.read(opts[:target].first)
+                   else
+                     `git diff HEAD~1..HEAD`
+                   end
+
+    if diff_payload.nil? || diff_payload.strip.empty?
+      puts "[VERIFICATION]: FAILED\n[REMAINING DEFECTS]: 1\n[UNRESOLVED FINDINGS]: No remediation diff provided."
+      exit 2
+    end
+
+    dev_prompt = verification_developer_prompt(profile_key, profile_info, lang, report_content)
+    output = case backend
+             when :gemini     then audit_via_gemini(dev_prompt, diff_payload, 'diff', profile_key, model, opts[:tier], lang)
+             when :claude     then audit_via_claude(dev_prompt, diff_payload, 'diff', profile_key, model, opts[:tier], lang)
+             when :codex      then audit_via_codex(dev_prompt, diff_payload, 'diff', profile_key, model, opts[:tier], lang)
+             when :openai_api then audit_via_api(ENV['OPENAI_API_KEY'], dev_prompt, diff_payload, 'diff', profile_key, model, opts[:tier], lang)
+             end
+
+    passed = output.to_s =~ /\[VERIFICATION\]:\s*PASSED/i && output.to_s !~ /\[VERIFICATION\]:\s*FAILED/i
+    exit(passed ? 0 : 2)
+  end
 
   payload_type, input_payload = collect_payload(
     opts[:target] || [],

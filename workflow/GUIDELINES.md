@@ -1,18 +1,16 @@
-# Autonomous Review & Closed-Loop Remediation Workflow
+# Autonomous Review Cycle & Remediation Guidelines
 
-[![Workflow Guidelines](https://img.shields.io/badge/Workflow-Guidelines-00ADD8?style=flat)](GUIDELINES.md)
-[![Workflow Rationale](https://img.shields.io/badge/Workflow-Rationale-8A2BE2?style=flat)](RATIONALE.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
+## 1. Overview & Closed-Loop Philosophy
 
-The `workflow` subsystem defines the authoritative architecture, tooling, and closed-loop engine for **autonomous adversarial code review, planning, sandbox remediation, quality gate verification, and targeted re-verification**.
+The `workflow` subsystem defines the authoritative guidelines for continuous, automated code review, sandbox remediation, and verification across **Go**, **Rust**, and **Ruby** projects.
 
-It is completely **language-agnostic** and provides native audit profiles, test detection, and AST complexity gate integrations for **Go**, **Rust**, and **Ruby**.
+The core objective is **closed-loop verification and defect convergence**. Unlike open-loop linters or conversational review bots that provide advisory comments, `review_cycle` operates as an autonomous, transactionally guarded remediation engine that holds code to rigorous domain standards.
 
 ---
 
-## Architecture: The 5-Phase Closed-Loop Verification Pipeline
+## 2. The 5-Phase Closed-Loop Lifecycle
 
-Every review cycle executes an autonomous, transactionally guarded workflow:
+Every review cycle executes a deterministic 5-phase pipeline:
 
 ```text
                   ┌──────────────────────────────────────────────┐
@@ -61,13 +59,11 @@ Every review cycle executes an autonomous, transactionally guarded workflow:
                   └──────────────────────────────────────────────┘
 ```
 
-For the theoretical and mathematical foundations behind closed-loop convergence and anti-oscillation, see [`RATIONALE.md`](RATIONALE.md).
-
 ---
 
-## The 6 Multi-Lens Audit Profiles
+## 3. The 6 Multi-Lens Audit Profiles
 
-Evaluation is strictly partitioned across 6 orthogonal domain lenses:
+Evaluation is strictly partitioned into 6 orthogonal domain lenses tailored for systems programming:
 
 | Profile | Domain Pillar | Primary Focus Area | Backend Affinity |
 | :--- | :--- | :--- | :--- |
@@ -80,95 +76,51 @@ Evaluation is strictly partitioned across 6 orthogonal domain lenses:
 
 ---
 
-## Asymmetric Model Architecture
+## 4. Asymmetric Model Architecture
 
-We pair high-reasoning models with fast, tool-integrated sandbox agents:
-1. **Auditing & Re-Verification (Discovery & Proof)**: **Tier 1 Codex & Claude**. Audit and verification require broad context analysis and deep reasoning. Profile affinity routes `systems`/`performance` to Codex and `security`/`correctness` to Claude.
-2. **Remediation (Implementation)**: **Gemini Flash (`agy-run-wild`)** inside [`bws gw`](https://github.com/sarielhp/bws). Once a defect is localized, Gemini Flash executes surgical edits and updates unit tests in 15–30 seconds.
-3. **Oracle (Deterministic Ground Truth)**: Compilers, unit test suites, and AST complexity linters (`tools/check.rb`, `go-audit`, `rust-audit`, `ruby-audit`).
-
----
-
-## Multi-Language Support: Go, Rust & Ruby
-
-The engine automatically detects the project language and enforces corresponding repository standards:
-
-| Language | Manifest | Authoritative Standards | Gate Tools | Test Conventions |
-| :--- | :--- | :--- | :--- | :--- |
-| **Go** | `go.mod` | [`standards/go/GUIDELINES.md`](../go/GUIDELINES.md) | `go-audit`, `go vet`, `go test -race` | `*_test.go` |
-| **Rust** | `Cargo.toml` | [`standards/rust/GUIDELINES.md`](../rust/GUIDELINES.md) | `rust-audit`, `clippy`, `cargo test` | `tests/**/*.rs`, `*_test.rs`, inline `#[cfg(test)]` |
-| **Ruby** | `Gemfile` / `lib/` | [`standards/ruby/GUIDELINES.md`](../ruby/GUIDELINES.md) | `ruby-audit`, `rubocop`, `rake test` | `test/**/test_*.rb`, `spec/**/*_spec.rb`, inline `def test_` |
+To maximize verification accuracy while maintaining speed and token efficiency:
+* **Auditor & Re-Verifier (Discovery & Proof)**: **Tier 1 High-Reasoning Models (Codex / Claude)**.
+  - Audit and verification require deep architectural context and broad invariant analysis.
+  - Profile affinity directs Codex to concurrency/systems and Claude to security/correctness.
+* **Remediator (Implementation & Refactoring)**: **Gemini Flash (`agy-run-wild`)** inside [`bws gw`](https://github.com/sarielhp/bws).
+  - Implementation is a bounded task: once the auditor pinpoints the line, root cause, and remediation pattern, Gemini Flash executes surgical edits in 15–30 seconds.
+  - Native integration with PTY streaming and local workspace tools ensures zero toolchain friction.
+* **Oracle (Non-Negotiable Invariant Filter)**: Local deterministic compilers and AST linters (`tools/check.rb`, `go-audit`, `rust-audit`, `ruby-audit`).
 
 ---
 
-## Directory Structure
+## 5. Bounded Verification & Circuit Breakers
 
-```text
-~/prog/standards/workflow/  (also symlinked as ~/prog/standards/review-cycle/)
-├── README.md               # Overview & quickstart guide
-├── GUIDELINES.md           # Operational rules, invariants & lifecycle contracts
-├── RATIONALE.md            # Empirical rationale, anti-oscillation, & model pairing
-├── bin/
-│   ├── review_cycle        # 5-phase closed-loop orchestration engine
-│   └── audit               # Multi-lens adversarial code auditor & verifier
-└── templates/
-    ├── review_cycle.json   # Standard repository configuration contract
-    └── AGENTS_SNIPPET.md   # Documentation snippet for project AGENTS.md
-```
+To prevent infinite oscillation and subjective drift:
+
+1. **Hold the Lens**: When Lens $L$ detects defects, it remains active. The engine does **not** advance to Lens $L+1$ until Lens $L$ is verified clean.
+2. **Targeted Verification (Anti-Oscillation)**: Re-verification does not re-scan the entire codebase open-endedly. It evaluates *strictly*:
+   - Did the patch resolve the specific reported defects?
+   - Did the patch introduce any new severity-1 regressions under that specific lens?
+3. **2-Attempt Circuit Breaker**: Remediation is bounded to **maximum 2 attempts per lens**.
+   - Attempt 1: Fix reported findings.
+   - Attempt 2: If verification fails, feed the auditor's specific verification failure back into the remediation prompt.
+   - If Attempt 2 fails: Automatically stash the failed branch (`reviews/failed_<num>_<profile>`), execute `git reset --hard` to base SHA, mark the profile as `blocked`, and halt.
 
 ---
 
-## How to Adopt in Any Project
+## 6. Test Anchoring & Mandatory Evidence Rules
 
-### 1. Link Tools to Project `tools/`
-
-In your repository:
-
-```bash
-mkdir -p tools
-ln -sf ~/prog/standards/workflow/bin/review_cycle tools/review_cycle
-ln -sf ~/prog/standards/workflow/bin/audit tools/audit
-```
-
-### 2. Onboard Automatically via `--setup`
-
-Run the onboard command in your repository:
-
-```bash
-./tools/review_cycle --setup
-```
-
-This verifies prerequisites, generates `tools/review_cycle.json`, adds artifact directories to `.gitignore`, and appends the agent documentation snippet to `AGENTS.md`.
+1. **Ban on "Prose Triage"**: An agent may not dismiss reported critical defects in markdown while modifying code without proof.
+   - If an issue is an invalid false positive: The agent must document the technical justification in the plan and modify **zero code and zero tests**. The cycle records `outcome: 'false_positive_triage'` and makes **no git commit**.
+   - If code is modified: Automated regression tests are **strictly mandatory**.
+2. **Polyglot Test Discovery**:
+   - **Go**: Modified `*_test.go` files.
+   - **Rust**: Modified `tests/**/*.rs`, `*_test.rs`, `src/tests.rs`, **OR inline `#[cfg(test)]` / `#[test]` blocks** in `src/`.
+   - **Ruby**: Modified `test/**/test_*.rb`, `spec/**/*_spec.rb`, **OR inline `def test_` / `it "..."` blocks**.
+3. **Mandatory Test-Weakening & Assertion Atrophy Guard**:
+   Cycles are immediately aborted and rolled back if the remediation introduces test skips (`t.Skip()`, `#[ignore]`, `skip`, `xit`) or deletes more than 2 assertions without adding at least half as many replacements.
 
 ---
 
-## CLI Usage Quick Reference
+## 7. Multi-Language Parity: Go, Rust & Ruby
 
-```bash
-# Run a single review and remediation cycle (profile affinity)
-tools/review_cycle
-
-# Run continuously until all 6 profiles pass clean without defects
-tools/review_cycle --loop
-
-# Inspect current rotation state, cycle count, and history
-tools/review_cycle --status
-
-# Dry-run: audit and generate review report without launching sandbox
-tools/review_cycle --dry-run
-
-# Run audit standalone on a specific profile or file
-tools/audit -p security src/
-
-# Run targeted re-verification on a patch against a previous report
-git diff HEAD~1..HEAD | tools/audit -p security -V reviews/001_security.md
-```
-
----
-
-## Prerequisites & Ecosystem Dependencies
-
-- **`bws`**: [Bubblewrap Git Worktree Sandbox](https://github.com/sarielhp/bws) (`bws gw`) creates an ephemeral, air-gapped sandbox clone with host `$HOME` protection and 1-key merge triage.
-- **`agy-run-wild`**: Autonomous coding agent runner dispatched inside the `bws` sandbox.
-- **`git`**: Version control and worktree management.
-- **Ruby >= 3.0**: Runtime for orchestrator scripts.
+The engine automatically discovers language context via repository manifests and injects authoritative standards:
+* **Go** (`go.mod`): Enforces [`~/prog/standards/go/GUIDELINES.md`](../go/GUIDELINES.md) and `go-audit` (nesting $\le 4$, branches $\le 15$, standard functions $\le 110$ lines).
+* **Rust** (`Cargo.toml`): Enforces [`~/prog/standards/rust/GUIDELINES.md`](../rust/GUIDELINES.md) and `rust-audit` (nesting $\le 4$, branches $\le 15$, functions $\le 80$ lines).
+* **Ruby** (`Gemfile` / `lib/`): Enforces [`~/prog/standards/ruby/GUIDELINES.md`](../ruby/GUIDELINES.md) and `ruby-audit` (nesting $\le 4$, branches $\le 15$, methods $\le 80$ lines).
