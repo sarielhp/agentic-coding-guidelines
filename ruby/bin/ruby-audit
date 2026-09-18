@@ -34,6 +34,7 @@ module RubyCodeAuditor
   MethodViolation = Struct.new(:file, :name, :line, :lines, :depth, :complexity, :reasons)
   FileViolation   = Struct.new(:file, :lines, :limit, :type)
   StyleViolation  = Struct.new(:file, :line, :message)
+  TrapViolation   = Struct.new(:file, :line, :trap, :message)
 
   def self.resource_block_node?(node)
     return false unless node.is_a?(RubyVM::AbstractSyntaxTree::Node) && node.type == :ITER
@@ -120,21 +121,46 @@ module RubyCodeAuditor
     reasons
   end
 
-  def self.check_style_issues(file_lines, file, style_violations)
+  MUTABLE_HASH_PATTERN = Regexp.new(['Hash', '\.new\(\s*(?:\[\s*\]|\{\s*\})\s*\)'].join)
+
+  def self.check_style_and_traps(file_lines, file, content, style_violations, trap_violations)
+    # Check for missing frozen_string_literal: true
+    unless content.include?('frozen_string_literal: true')
+      style_violations << StyleViolation.new(file, 1, "missing '# frozen_string_literal: true' header comment")
+    end
+
     file_lines.each_with_index do |line, idx|
-      # Check for 'else' after terminal statement
-      next unless line =~ /^\s*(?:else|elsif)\b/
+      clean_line = line.sub(/#.*$/, '').strip
+      next if clean_line.empty?
 
-      prev_lines = file_lines[0...idx].reverse
-      prev = prev_lines.find { |l| l !~ /^\s*(?:#|$)/ }
-      next unless prev =~ /^\s*(?:return\b|raise\b|fail\b|break\b|next\b)/
+      # 1. Check for 'else' after terminal statement
+      if clean_line =~ /^(?:else|elsif)\b/
+        prev_lines = file_lines[0...idx].reverse
+        prev = prev_lines.find { |l| l !~ /^\s*(?:#|$)/ }
+        if prev =~ /^\s*(?:return\b|raise\b|fail\b|break\b|next\b)/
+          term = Regexp.last_match(0).strip
+          style_violations << StyleViolation.new(file, idx + 1, "unnecessary 'else' after terminal statement '#{term}'")
+        end
+      end
 
-      term = Regexp.last_match(0).strip
-      style_violations << StyleViolation.new(file, idx + 1, "unnecessary 'else' after terminal statement '#{term}'")
+      # 2. Check for bare 'rescue Exception'
+      if clean_line =~ /\brescue\s+(?:::)?Exception\b/ && !line.include?('ruby-audit: allow-rescue-exception')
+        trap_violations << TrapViolation.new(file, idx + 1, 'rescue_exception', "unsafe 'rescue Exception' traps system interrupts and signals; rescue StandardError instead")
+      end
+
+      # 3. Check for Hash.new([]) or Hash.new({}) mutable default trap
+      if clean_line =~ MUTABLE_HASH_PATTERN
+        trap_violations << TrapViolation.new(file, idx + 1, 'hash_default_mutable', "Hash.new with mutable literal shares a single instance; use block form: Hash.new { |h, k| h[k] = [] }")
+      end
+
+      # 4. Check for global core class reopening / monkey patching
+      if clean_line =~ /^class\s+(String|Array|Hash|Integer|Float|Symbol|Numeric)\b/
+        trap_violations << TrapViolation.new(file, idx + 1, 'core_monkey_patch', "global reopening of core class '#{Regexp.last_match(1)}' is prohibited; use Refinements or utility modules")
+      end
     end
   end
 
-  def self.audit_file(file, options, violations, all_methods, file_violations, style_violations)
+  def self.audit_file(file, options, violations, all_methods, file_violations, style_violations, trap_violations)
     return unless File.file?(file)
 
     content = File.read(file) rescue nil
@@ -153,8 +179,8 @@ module RubyCodeAuditor
       end
     end
 
-    # Check Style Issues
-    check_style_issues(file_lines, file, style_violations)
+    # Check Style and Trap Issues
+    check_style_and_traps(file_lines, file, content, style_violations, trap_violations)
 
     # Check AST Method Metrics
     ast = RubyVM::AbstractSyntaxTree.parse(content) rescue nil
@@ -266,7 +292,7 @@ module RubyCodeAuditor
     [options, targets]
   end
 
-  def self.report_results(violations, all_methods, file_violations, style_violations, options)
+  def self.report_results(violations, all_methods, file_violations, style_violations, trap_violations, options)
     if options[:verbose]
       puts "Audited #{all_methods.length} methods across files."
       all_methods.sort_by { |m| -m[:cc] }.first(20).each do |m|
@@ -285,16 +311,26 @@ module RubyCodeAuditor
       puts "  \e[33m⚠️ Style: #{s.file}:#{s.line} - #{s.message}\e[0m"
     end
 
+    # Print Trap Violations
+    if trap_violations.any?
+      puts "\n\e[31m❌ Critical Ruby trap violations:\e[0m"
+      trap_violations.each do |t|
+        puts "  \e[31m#{t.file}:#{t.line}\e[0m [#{t.trap}]: #{t.message}"
+      end
+    end
+
     hard_file_violations = file_violations.select { |f| f.type == :hard }
-    has_hard_violations = violations.any? || hard_file_violations.any?
+    has_hard_violations = violations.any? || hard_file_violations.any? || trap_violations.any?
 
     if has_hard_violations
-      puts "\n\e[31m❌ Code metric violations found:\e[0m"
-      hard_file_violations.each do |f|
-        puts "  \e[31m#{f.file}\e[0m: File length #{f.lines} exceeds hard limit of #{f.limit} lines"
-      end
-      violations.each do |v|
-        puts "  \e[31m#{v.file}:#{v.line}\e[0m - \e[1m#{v.name}\e[0m: #{v.reasons.join(', ')} [lines=#{v.lines}, depth=#{v.depth}, cc=#{v.complexity}]"
+      if hard_file_violations.any? || violations.any?
+        puts "\n\e[31m❌ Code metric violations found:\e[0m"
+        hard_file_violations.each do |f|
+          puts "  \e[31m#{f.file}\e[0m: File length #{f.lines} exceeds hard limit of #{f.limit} lines"
+        end
+        violations.each do |v|
+          puts "  \e[31m#{v.file}:#{v.line}\e[0m - \e[1m#{v.name}\e[0m: #{v.reasons.join(', ')} [lines=#{v.lines}, depth=#{v.depth}, cc=#{v.complexity}]"
+        end
       end
       return 1
     end
@@ -316,12 +352,13 @@ module RubyCodeAuditor
     all_methods = []
     file_violations = []
     style_violations = []
+    trap_violations = []
 
     files.each do |f|
-      audit_file(f, options, violations, all_methods, file_violations, style_violations)
+      audit_file(f, options, violations, all_methods, file_violations, style_violations, trap_violations)
     end
 
-    report_results(violations, all_methods, file_violations, style_violations, options)
+    report_results(violations, all_methods, file_violations, style_violations, trap_violations, options)
   end
 end
 
