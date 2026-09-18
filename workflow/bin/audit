@@ -8,25 +8,26 @@ require 'open3'
 require 'optparse'
 require 'fileutils'
 
-REPO_ROOT = File.expand_path('..', __dir__)
+git_root = `git rev-parse --show-toplevel 2>/dev/null`.strip
+REPO_ROOT = git_root.empty? ? File.expand_path('..', __dir__) : git_root
 VERSION = '0.1.0'
 
 def detect_project_language(dir = REPO_ROOT)
   pname = File.basename(dir)
-  if Dir.exist?(File.join(dir, 'lib', pname)) || File.exist?(File.join(dir, pname))
-    :ruby
-  elsif File.exist?(File.join(dir, 'Gemfile')) || File.exist?(File.join(dir, '.rubocop.yml'))
-    :ruby
-  elsif File.exist?(File.join(dir, 'go.mod'))
+  if File.exist?(File.join(dir, 'go.mod'))
     :go
   elsif File.exist?(File.join(dir, 'Cargo.toml'))
     :rust
-  elsif Dir.glob(File.join(dir, '**', '*.rb')).any?
+  elsif File.exist?(File.join(dir, 'Gemfile')) || File.exist?(File.join(dir, '.rubocop.yml'))
+    :ruby
+  elsif Dir.exist?(File.join(dir, 'lib', pname))
     :ruby
   elsif Dir.glob(File.join(dir, '**', '*.go')).any?
     :go
   elsif Dir.glob(File.join(dir, '**', '*.rs')).any?
     :rust
+  elsif Dir.glob(File.join(dir, '**', '*.rb')).any?
+    :ruby
   else
     :generic
   end

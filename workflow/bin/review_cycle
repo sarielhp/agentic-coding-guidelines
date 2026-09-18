@@ -499,20 +499,20 @@ class MultiProfileReviewCycle
   # Language & Framework Helpers
   def detect_project_language
     pname = File.basename(REPO_ROOT)
-    if Dir.exist?(File.join(REPO_ROOT, 'lib', pname)) || File.exist?(File.join(REPO_ROOT, pname))
-      :ruby
-    elsif File.exist?(File.join(REPO_ROOT, 'Gemfile'))
-      :ruby
-    elsif File.exist?(File.join(REPO_ROOT, 'go.mod'))
+    if File.exist?(File.join(REPO_ROOT, 'go.mod'))
       :go
     elsif File.exist?(File.join(REPO_ROOT, 'Cargo.toml'))
       :rust
-    elsif Dir.glob(File.join(REPO_ROOT, '**', '*.rb')).any?
+    elsif File.exist?(File.join(REPO_ROOT, 'Gemfile')) || File.exist?(File.join(REPO_ROOT, '.rubocop.yml'))
+      :ruby
+    elsif Dir.exist?(File.join(REPO_ROOT, 'lib', pname))
       :ruby
     elsif Dir.glob(File.join(REPO_ROOT, '**', '*.go')).any?
       :go
     elsif Dir.glob(File.join(REPO_ROOT, '**', '*.rs')).any?
       :rust
+    elsif Dir.glob(File.join(REPO_ROOT, '**', '*.rb')).any?
+      :ruby
     else
       :generic
     end
@@ -1926,8 +1926,8 @@ class MultiProfileReviewCycle
     run_doctor
 
     puts "2. Initializing Repository Configuration:"
-    cfg_path = setup_generate_config
     setup_provision_audit
+    cfg_path = setup_generate_config
     setup_update_gitignore
     setup_update_agents_doc
 
