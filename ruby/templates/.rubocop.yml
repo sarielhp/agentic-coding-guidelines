@@ -1,0 +1,64 @@
+# Balanced RuboCop configuration aligned with ~/prog/standards/ruby/GUIDELINES.md
+# Cognitive metrics (complexity, method length, depth) are enforced via `ruby-audit`.
+
+AllCops:
+  TargetRubyVersion: 3.0
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'vendor/**/*'
+    - 'junk/**/*'
+    - '.bundle/**/*'
+    - 'tmp/**/*'
+
+# Metric thresholds: Defer to `ruby-audit` for cognitive complexity & tiered sizing
+Metrics/MethodLength:
+  Enabled: false
+
+Metrics/BlockLength:
+  Exclude:
+    - 'test/**/*'
+    - 'spec/**/*'
+    - 'Rakefile'
+    - '*.gemspec'
+
+Metrics/CyclomaticComplexity:
+  Enabled: false
+
+Metrics/PerceivedComplexity:
+  Enabled: false
+
+Metrics/AbcSize:
+  Enabled: false
+
+Metrics/ClassLength:
+  Max: 800
+
+# String allocation hygiene
+Style/FrozenStringLiteralComment:
+  Enabled: true
+  EnforcedStyle: always
+
+Style/StringConcatenation:
+  Enabled: false # Permit string concatenation where appropriate
+
+# Control flow & happy path line-of-sight
+Style/GuardClause:
+  Enabled: true
+
+Style/IfUnlessModifier:
+  Enabled: true
+
+Style/EmptyElse:
+  EnforcedStyle: empty
+
+# Safety & Exception Handling
+Lint/RescueException:
+  Enabled: true
+
+Lint/SuppressedException:
+  Enabled: true
+
+# Process Execution Safety
+Security/Open:
+  Enabled: true

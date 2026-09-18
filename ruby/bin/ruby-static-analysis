@@ -1,0 +1,156 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# ~/prog/standards/ruby/bin/ruby-static-analysis
+#
+# Static analysis orchestrator for Ruby codebases:
+# 1. Syntax Validation: ruby -cw
+# 2. Idiom & Style Hygiene: rubocop
+# 3. Supply-Chain Security: bundle-audit (Ruby Advisory Database)
+# 4. Clone & Duplication: dupl AST clone detector
+# ==============================================================================
+
+require 'open3'
+require 'optparse'
+
+VERSION = '0.1.0'
+
+options = {
+  syntax: false,
+  rubocop: false,
+  vuln: false,
+  dups: false,
+  quiet: false,
+  strict: false,
+  threshold: 50
+}
+
+OptionParser.new do |opts|
+  opts.banner = 'Usage: ruby-static-analysis [options] [paths...]'
+  opts.on('--syntax', 'Run only Ruby syntax check (ruby -cw)') { options[:syntax] = true }
+  opts.on('--rubocop', 'Run only RuboCop style and idiom analysis') { options[:rubocop] = true }
+  opts.on('--vuln', 'Run only dependency vulnerability check (bundle-audit)') { options[:vuln] = true }
+  opts.on('--dups', 'Run only code clone and duplication detector (dupl)') { options[:dups] = true }
+  opts.on('-t', '--threshold TOKENS', Integer, "Duplication clone threshold (default: #{options[:threshold]})") { |v| options[:threshold] = v }
+  opts.on('-q', '--quiet', 'Show only sections with findings') { options[:quiet] = true }
+  opts.on('--strict', 'Exit with error code if any warnings or issues are found') { options[:strict] = true }
+  opts.on('--version', 'Show version and exit') do
+    puts "ruby-static-analysis v#{VERSION}"
+    exit 0
+  end
+  opts.on('-h', '--help', 'Show this help message') do
+    puts opts
+    exit 0
+  end
+end.parse!
+
+target_paths = ARGV.empty? ? ['.'] : ARGV
+
+run_all = !options[:syntax] && !options[:rubocop] && !options[:vuln] && !options[:dups]
+total_issues = 0
+
+def tool_available?(name)
+  ENV['PATH'].to_s.split(File::PATH_SEPARATOR).any? do |dir|
+    bin = File.join(dir, name)
+    File.file?(bin) && File.executable?(bin)
+  end
+end
+
+def puts_header(title)
+  puts "\n\e[1;36m=== #{title} ===\e[0m"
+end
+
+# 1. Syntax Validation (ruby -cw)
+if run_all || options[:syntax]
+  puts_header('Ruby Syntax Validation (ruby -cw)') unless options[:quiet]
+  syntax_errors = []
+
+  files = target_paths.flat_map do |p|
+    if File.directory?(p)
+      Dir.glob(File.join(p, '**', '*.rb'))
+    elsif File.file?(p)
+      [p]
+    else
+      Dir.glob(p)
+    end
+  end.uniq.select { |f| File.file?(f) && !f.include?('/vendor/') && !f.include?('/junk/') }
+
+  files.each do |f|
+    _, err, status = Open3.capture3("ruby -cw #{f}")
+    unless status.success? && (err.empty? || err.strip == 'Syntax OK')
+      clean_err = err.lines.reject { |l| l.strip == 'Syntax OK' }.join.strip
+      syntax_errors << "  \e[31m#{f}\e[0m:\n#{clean_err}" unless clean_err.empty?
+    end
+  end
+
+  if syntax_errors.empty?
+    puts "  \e[32m✔ Syntax OK across #{files.size} file(s)\e[0m" unless options[:quiet]
+  else
+    puts "\e[31m❌ Syntax errors detected:\e[0m"
+    syntax_errors.each { |e| puts e }
+    total_issues += syntax_errors.size
+  end
+end
+
+# 2. RuboCop
+if run_all || options[:rubocop]
+  if tool_available?('rubocop')
+    puts_header('RuboCop Style & Idiom Analysis') unless options[:quiet]
+    rubocop_cmd = "rubocop #{target_paths.join(' ')}"
+    out, err, status = Open3.capture3(rubocop_cmd)
+    if status.success?
+      puts "  \e[32m✔ RuboCop passed with 0 offenses\e[0m" unless options[:quiet]
+    else
+      puts out unless out.strip.empty?
+      puts err unless err.strip.empty?
+      total_issues += 1
+    end
+  else
+    puts "  \e[33mℹ RuboCop not installed (run ruby-install-tools)\e[0m" unless options[:quiet]
+  end
+end
+
+# 3. Supply-Chain Vulnerabilities (bundle-audit)
+if run_all || options[:vuln]
+  has_lockfile = File.exist?('Gemfile.lock')
+  if has_lockfile
+    if tool_available?('bundle-audit')
+      puts_header('Dependency Vulnerability Audit (bundle-audit)') unless options[:quiet]
+      out, err, status = Open3.capture3('bundle-audit check')
+      if status.success?
+        puts "  \e[32m✔ No known vulnerabilities found\e[0m" unless options[:quiet]
+      else
+        puts out unless out.strip.empty?
+        puts err unless err.strip.empty?
+        total_issues += 1
+      end
+    else
+      puts "  \e[33mℹ bundle-audit not installed (run ruby-install-tools)\e[0m" unless options[:quiet]
+    end
+  end
+end
+
+# 4. AST Duplication & Clone Detection (dupl)
+if run_all || options[:dups]
+  if tool_available?('dupl')
+    puts_header("Code Clone & Duplication Detector (dupl, threshold: #{options[:threshold]})") unless options[:quiet]
+    dupl_cmd = "dupl -t #{options[:threshold]} #{target_paths.join(' ')}"
+    out, _, status = Open3.capture3(dupl_cmd)
+    clones = out.lines.select { |l| l =~ /^.*?:\d+-\d+:\s+duplicate of/ }
+    if clones.empty?
+      puts "  \e[32m✔ No clones found above threshold #{options[:threshold]}\e[0m" unless options[:quiet]
+    else
+      puts "\e[33m⚠️ Potential clones detected:\e[0m"
+      puts out
+      total_issues += clones.size if options[:strict]
+    end
+  end
+end
+
+if total_issues.positive? && options[:strict]
+  puts "\n\e[31m❌ ruby-static-analysis failed: #{total_issues} issue(s) detected.\e[0m"
+  exit 1
+end
+
+exit 0

@@ -1,0 +1,183 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# ~/prog/standards/ruby/bin/ruby-install-tools
+#
+# Environment auditor and installer for Ruby development tooling:
+# - Ruby Gems: rubocop, ruby-lsp, bundler-audit, rainbow, minitest
+# - System & CLI Tools: ast-grep (sg), repomix, rtk, dupl
+# - PATH validation for user gem and local binary directories
+# ==============================================================================
+
+require 'fileutils'
+require 'open3'
+require 'optparse'
+
+module RubyDevInstaller
+  GREEN  = "\e[32m"
+  YELLOW = "\e[33m"
+  RED    = "\e[31m"
+  CYAN   = "\e[36m"
+  BOLD   = "\e[1m"
+  RESET  = "\e[0m"
+
+  def self.user_gem_bindir
+    @user_gem_bindir ||= File.join(Gem.user_dir, 'bin')
+  end
+
+  def self.local_bindir
+    @local_bindir ||= File.expand_path('~/.local/bin')
+  end
+
+  def self.cargo_bindir
+    @cargo_bindir ||= File.expand_path('~/.cargo/bin')
+  end
+
+  def self.home_bindir
+    @home_bindir ||= File.expand_path('~/bin')
+  end
+
+  def self.command_available?(cmd)
+    ENV['PATH'].to_s.split(File::PATH_SEPARATOR).any? do |dir|
+      bin = File.join(dir, cmd.to_s)
+      File.file?(bin) && File.executable?(bin)
+    end
+  end
+
+  def self.gem_available?(gem_name)
+    Gem::Specification.find_all_by_name(gem_name).any?
+  rescue StandardError
+    false
+  end
+
+  def self.run_cmd(cmd_array, verbose: false)
+    puts "      Running: #{cmd_array.join(' ')}" if verbose
+    stdout_stderr, status = Open3.capture2e(*cmd_array)
+    puts stdout_stderr if verbose && !stdout_stderr.empty?
+    status.success?
+  end
+
+  def self.check_path_environment
+    puts "#{BOLD}==> 1. Checking PATH Configuration#{RESET}"
+    paths = ENV['PATH'].to_s.split(File::PATH_SEPARATOR)
+
+    dirs = [
+      ['User Gem bin', user_gem_bindir],
+      ['User Local bin', local_bindir],
+      ['Cargo bin', cargo_bindir],
+      ['Home bin', home_bindir]
+    ]
+
+    all_ok = true
+    dirs.each do |label, path|
+      if paths.include?(path)
+        puts "  [#{GREEN}OK#{RESET}] #{label} in PATH: #{path}"
+      else
+        puts "  [#{YELLOW}WARN#{RESET}] #{label} NOT found in PATH: #{path}"
+        all_ok = false
+      end
+    end
+
+    unless all_ok
+      puts "  #{YELLOW}Recommendation: Add missing paths to your ~/.bashrc or ~/.zshrc:#{RESET}"
+      puts "    export PATH=\"#{home_bindir}:#{user_gem_bindir}:#{local_bindir}:#{cargo_bindir}:$PATH\""
+    end
+    puts ''
+  end
+
+  GEM_SPECS = [
+    { name: 'rubocop', binary: 'rubocop', desc: 'Static code analyzer and formatter' },
+    { name: 'ruby-lsp', binary: 'ruby-lsp', desc: 'Shopify Ruby Language Server Protocol' },
+    { name: 'bundler-audit', binary: 'bundle-audit', desc: 'Dependency vulnerability security auditor' },
+    { name: 'rainbow', binary: nil, desc: 'Terminal ANSI color formatting library' },
+    { name: 'minitest', binary: nil, desc: 'Fast, lightweight testing framework' }
+  ].freeze
+
+  CLI_TOOLS = [
+    { cmd: 'sg', name: 'ast-grep', desc: 'AST code search and structural refactoring' },
+    { cmd: 'repomix', name: 'repomix', desc: 'Repository context bundler for LLMs' },
+    { cmd: 'rtk', name: 'rtk', desc: 'CLI token compression proxy' },
+    { cmd: 'dupl', name: 'dupl', desc: 'Code clone and duplicate block detector' }
+  ].freeze
+
+  def self.verify_and_install_gems(check_only: false, verbose: false)
+    puts "#{BOLD}==> 2. Checking Core Ruby Gems#{RESET}"
+    FileUtils.mkdir_p(user_gem_bindir)
+
+    GEM_SPECS.each do |spec|
+      name = spec[:name]
+      bin = spec[:binary]
+      desc = spec[:desc]
+
+      gem_ok = gem_available?(name)
+      bin_ok = bin ? command_available?(bin) : true
+
+      if gem_ok && bin_ok
+        puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+      elsif check_only
+        puts "  [#{YELLOW}MISSING#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+      else
+        install_gem(name, bin, desc, verbose: verbose)
+      end
+    end
+    puts ''
+  end
+
+  def self.install_gem(name, bin, desc, verbose: false)
+    print "  [..] Installing #{BOLD}#{name}#{RESET} (#{desc})... "
+    cmd = ['gem', 'install', '--user-install', '--bindir', user_gem_bindir, name]
+    success = run_cmd(cmd, verbose: verbose)
+
+    if success && bin
+      binstub_path = File.join(user_gem_bindir, bin)
+      unless File.exist?(binstub_path)
+        pristine_cmd = ['gem', 'pristine', name, '--bindir', user_gem_bindir]
+        run_cmd(pristine_cmd, verbose: verbose)
+      end
+    end
+
+    if success
+      puts "\r  [#{GREEN}INSTALLED#{RESET}] #{BOLD}#{name}#{RESET}"
+    else
+      puts "\r  [#{RED}FAILED#{RESET}] #{BOLD}#{name}#{RESET}"
+    end
+  end
+
+  def self.verify_cli_tools
+    puts "#{BOLD}==> 3. Checking External CLI Acceleration Tools#{RESET}"
+    CLI_TOOLS.each do |tool|
+      if command_available?(tool[:cmd])
+        path = `which #{tool[:cmd]} 2>/dev/null`.strip
+        puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{tool[:name]}#{RESET} (#{tool[:desc]}) -> #{path}"
+      else
+        puts "  [#{YELLOW}WARN#{RESET}] #{BOLD}#{tool[:name]}#{RESET} (#{tool[:desc]}) not found in PATH"
+      end
+    end
+    puts ''
+  end
+
+  def self.run(args = ARGV)
+    check_only = false
+    verbose = false
+
+    OptionParser.new do |opts|
+      opts.banner = 'Usage: ruby-install-tools [options]'
+      opts.on('-c', '--check-only', 'Audit environment without installing missing gems') { check_only = true }
+      opts.on('-v', '--verbose', 'Show verbose installation outputs') { verbose = true }
+      opts.on('-h', '--help', 'Show this help') do
+        puts opts
+        exit 0
+      end
+    end.parse!(args)
+
+    puts "\e[1;36m=== Ruby Development Environment & Tooling Auditor ===\e[0m\n\n"
+    check_path_environment
+    verify_and_install_gems(check_only: check_only, verbose: verbose)
+    verify_cli_tools
+    puts "\e[32m✔ Environment audit complete.\e[0m\n\n"
+    0
+  end
+end
+
+exit RubyDevInstaller.run if $PROGRAM_NAME == __FILE__

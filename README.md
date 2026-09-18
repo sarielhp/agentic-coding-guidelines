@@ -2,6 +2,7 @@
 
 [![Go Standards](https://img.shields.io/badge/Language-Go-00ADD8?style=flat&logo=go)](go/GUIDELINES.md)
 [![Rust Standards](https://img.shields.io/badge/Language-Rust-dea584?style=flat&logo=rust)](rust/GUIDELINES.md)
+[![Ruby Standards](https://img.shields.io/badge/Language-Ruby-CC342D?style=flat&logo=ruby)](ruby/GUIDELINES.md)
 [![Review Cycle](https://img.shields.io/badge/Workflow-Review%20Cycle-8A2BE2?style=flat)](workflow/README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -27,12 +28,12 @@ Raw line counts are a crude proxy for code clarity. **Cognitive complexity** (ne
 
 1. **Cognitive Limits Over Raw Lines**: Control flow nesting is capped at **depth $\le 4$** (warn at 3), and conditional decision points at **branches $\le 15$**.
 2. **Cognitive Tiering**: Function length thresholds reflect architectural responsibility:
-   - **Standard Business Logic**: 20–60 lines (hard limit: **110 lines**)
-   - **Declarative Builders & UI Layouts** (`build*`, `render*`, `View`, CLI args): Hard limit: **160 lines**
-   - **Event & Route Dispatchers** (`handle*`, `dispatch*`, flat `match`): Hard limit: **200 lines**
-   - **Integration & Unit Tests** (`Test*` / `#[test]`): Hard limit: **250 lines**
+   - **Standard Business Logic**: 20–60 lines (hard limit: **110 lines** in Go/Rust, **80 lines** in Ruby)
+   - **Declarative Builders & UI Layouts** (`build*`, `render*`, `View`, CLI args): Hard limit: **160 lines** (120 in Ruby)
+   - **Event & Route Dispatchers** (`handle*`, `dispatch*`, flat `match`): Hard limit: **200 lines** (150 in Ruby)
+   - **Integration & Unit Tests** (`Test*` / `#[test]` / `test_*`): Hard limit: **250 lines** (150 in Ruby)
 3. **Flat Switch / Match Exemption**: A `switch` or `match` counts as 1 decision point; individual flat arms delegating to named helpers do not increment branch complexity.
-4. **Left-Aligned "Line of Sight"**: Happy path using guard clauses (`let-else` in Rust, early `if err != nil` in Go). **Strict prohibition of `else` after terminal statements** (`return`, `continue`, `break`, `panic`).
+4. **Left-Aligned "Line of Sight"**: Happy path using guard clauses (`let-else` in Rust, early `if err != nil` in Go, `return unless` in Ruby). **Strict prohibition of `else` after terminal statements** (`return`, `continue`, `break`, `panic`, `raise`).
 5. **Anti-Decomposition Rules for Agents**:
    - Every extracted helper must have a cohesive, domain-named responsibility.
    - Never extract artificial continuation fragments (`stepA`, `stepB`).
@@ -76,6 +77,20 @@ agentic-coding-guidelines/
 │       ├── commit.rb         # Gated commit with .verified_head
 │       ├── bump.rb           # 3-Tier milestone version bump & install script
 │       └── install.rb        # Direct cargo install --root ~ script
+├── ruby/
+│   ├── README.md             # Ruby quick reference & CLI usage
+│   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
+│   ├── RATIONALE.md          # Deep-dive philosophy, block scoping, GC memory churn
+│   ├── bin/                  # Standalone verification CLI tools
+│   │   ├── ruby-audit        # AST cognitive complexity, depth & sizing auditor
+│   │   ├── ruby-static-analysis # Multi-linter orchestrator (syntax, rubocop, bundle-audit, dupl)
+│   │   └── ruby-install-tools# Automated gem and tooling auditor/installer
+│   └── templates/            # Reusable project workflow templates
+│       ├── Makefile.snippet  # Standard Makefile targets
+│       ├── check.rb          # Pre-commit CI quality gate
+│       ├── commit.rb         # Gated commit with .verified_head
+│       ├── bump.rb           # Semver bump & tag script
+│       └── .rubocop.yml      # Balanced RuboCop configuration
 └── workflow/                 # Autonomous Review & Remediation Loop (review-cycle)
     ├── README.md             # Architecture, 5-phase loop & 4:2:1 cadence spec
     ├── bin/                  # Autonomous orchestration binaries

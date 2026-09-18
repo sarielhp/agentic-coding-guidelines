@@ -1,0 +1,41 @@
+# Standard Ruby Quality Targets (include or adapt in project Makefile)
+
+.PHONY: all check ci lint audit review static-analysis test commit bump clean
+
+all: check
+
+# Fast everyday gate: syntax, ruby-audit metrics, rubocop, test
+check:
+	tools/check
+
+ci: check
+
+# Sizing & cognitive complexity audit
+audit:
+	ruby-audit
+
+# Fast static linting
+lint:
+	ruby -cw lib/**/*.rb bin/*
+	rubocop --parallel
+	ruby-audit --quiet
+
+# Deep multi-tool static analysis
+review: static-analysis
+static-analysis:
+	ruby-static-analysis
+
+# Offline unit tests
+test:
+	bundle exec rake test || ruby -Ilib:test test/test_*.rb
+
+# Gated commit (runs check first, stages, commits, pushes)
+commit:
+	tools/commit "$(msg)"
+
+# Increment patch version, verify, commit, push, and install
+bump:
+	tools/bump
+
+clean:
+	rm -rf .bundle/ tmp/ coverage/
