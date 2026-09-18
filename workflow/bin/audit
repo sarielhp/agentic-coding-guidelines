@@ -590,8 +590,9 @@ def verification_developer_prompt(profile_key, profile_info, lang, report_conten
     [VERIFICATION]: PASSED or FAILED
     [REMAINING DEFECTS]: 0 (or integer count of unresolved defects)
     [RESOLVED FINDINGS]: Summary of findings successfully resolved
-    [UNRESOLVED FINDINGS]: Concrete explanation if any findings remain unfixed
-    [NEW REGRESSIONS]: Concrete explanation if any new Critical/Major bugs were introduced
+    [UNRESOLVED FINDINGS]: Concrete explanation if any findings remain unfixed. Specify which finding numbers or locations remain unfixed and why.
+    [UNRESOLVED SEVERITIES]: Critical: X, Major: Y, Moderate: Z, Minor: W (or None)
+    [NEW REGRESSIONS]: Concrete explanation if any new Critical/Major bugs were introduced (or 'None')
 
     If all defects are resolved with no regressions, you MUST output "[VERIFICATION]: PASSED" and "[REMAINING DEFECTS]: 0".
   PROMPT

@@ -26,6 +26,7 @@ Every review cycle executes a deterministic 5-phase pipeline:
                   │ (bws gw -b fix-branch -- agy-run-wild)       │
                   │  - Gemini Flash: fast (15-30s) bounded edits │
                   │  - Enforce regression test + no atrophy      │
+                  │  - Round 2+: laser-focused cognitive relief  │
                   │  - Auto-squash-merge to branch               │
                   └───────────────────────┬──────────────────────┘
                                           │
@@ -35,28 +36,35 @@ Every review cycle executes a deterministic 5-phase pipeline:
                   │ (tools/gate, check.rb, go-audit, test -race) │
                   └───────────────────────┬──────────────────────┘
                                           │
-                             Gate Passed? │ (Failed -> Stash branch, Rollback & Halt)
+                             Gate Passed? │ (Failed -> Restore latest ratchet point)
                                           ▼
                   ┌──────────────────────────────────────────────┐
                   │ Phase 4: Targeted Re-Verification Pass       │
                   │ (tools/audit --verify-remediation)           │
                   │  - Re-invoke SAME auditor (Codex/Claude)     │
-                  │  - Bounded verification on patch vs findings │
+                  │  - Cumulative diff verification: base..HEAD  │
+                  │  - Evaluate 0 regressions & severity ratchet │
                   └───────────────────────┬──────────────────────┘
                                           │
-                     Verified Clean? ─────┼────── Defect Remains / Regressed?
-                            │             │               │
-                            │             ▼               ▼
-                            │      Attempt < 2?     Attempt == 2?
-                            │             │               │
-                            │       (Re-enter P2)   (Stash branch, Rollback & Block)
-                            ▼             │               │
-                  ┌───────────────────────┴───────────────┴──────┐
-                  │ Phase 5: State Update & Clean Advance        │
-                  │  - If clean: mark lens CLEAN, rotate to next │
-                  │  - If blocked: mark lens BLOCKED, halt loop  │
-                  │  - Discard empty commits if false-positive   │
-                  └──────────────────────────────────────────────┘
+            ┌─────────────────────────────┴─────────────────────────────┐
+            │                                                           │
+   Verified Clean (0 defects)                              Partial / Failed / Regressed
+            │                                                           │
+            ▼                                                           ▼
+┌──────────────────────────────────────┐            ┌──────────────────────────────────────┐
+│ Phase 5: Complete & Advance          │            │ Monotonic Progressive Ratchet Check  │
+│  - Mark lens CLEAN, commit & archive │            │  - Lexicographical progress check    │
+│  - Rotate to next profile in cadence │            │    (highest open severity reduced)   │
+└──────────────────────────────────────┘            │  - Regressed / No progress?          │
+                                                    │    Reset to latest ratchet point     │
+                                                    │  - Attempts remaining (< max)?       │
+                                                    │    Re-enter P2 with laser prompt     │
+                                                    │  - Attempts exhausted (>= max)?      │
+                                                    │    * If ratchet > base: commit &     │
+                                                    │      archive partial_remediation     │
+                                                    │    * If ratchet == base: rollback    │
+                                                    │      workspace & mark BLOCKED        │
+                                                    └──────────────────────────────────────┘
 ```
 
 ---
@@ -89,18 +97,22 @@ To maximize verification accuracy while maintaining speed and token efficiency:
 
 ---
 
-## 5. Bounded Verification & Circuit Breakers
+## 5. Monotonic Progressive Ratchet & Bounded Circuit Breakers
 
-To prevent infinite oscillation and subjective drift:
+To prevent infinite oscillation, subjective drift, and destructive all-or-nothing rollbacks:
 
-1. **Hold the Lens**: When Lens $L$ detects defects, it remains active. The engine does **not** advance to Lens $L+1$ until Lens $L$ is verified clean.
-2. **Targeted Verification (Anti-Oscillation)**: Re-verification does not re-scan the entire codebase open-endedly. It evaluates *strictly*:
-   - Did the patch resolve the specific reported defects?
-   - Did the patch introduce any new severity-1 regressions under that specific lens?
-3. **2-Attempt Circuit Breaker**: Remediation is bounded to **maximum 2 attempts per lens**.
-   - Attempt 1: Fix reported findings.
-   - Attempt 2: If verification fails, feed the auditor's specific verification failure back into the remediation prompt.
-   - If Attempt 2 fails: Automatically stash the failed branch (`reviews/failed_<num>_<profile>`), execute `git reset --hard` to base SHA, mark the profile as `blocked`, and halt.
+1. **Hold the Lens**: When Lens $L$ detects defects, it remains active. The engine does **not** advance to Lens $L+1$ until Lens $L$ is verified clean or settled at a verified partial ratchet.
+2. **Cumulative Targeted Verification**: Re-verification does not re-scan the entire codebase open-endedly. It evaluates the cumulative diff (`base_sha..HEAD`) strictly:
+   - *Fix Conformance*: Did the patch eliminate the reported defects?
+   - *Regression Freedom*: Did the patch introduce any new Critical or Major bugs in affected paths?
+3. **The Monotonic Progressive Ratchet**:
+   - **No Discarding of Verified Improvements**: If an attempt resolves $K$ out of $N$ findings with zero regressions and passes the quality gate, that progress is monotonically ratcheted forward (`last_ratchet_sha = HEAD`).
+   - **Lexicographical Severity Invariant**: Progress is measured lexicographically: $(\Delta N_{\text{Crit}}, \Delta N_{\text{Maj}}, \Delta N_{\text{Mod}})$. Progress must reduce open defects on the **highest active severity tier**. Resolving lower-tier or stylistic issues while failing to address open Critical defects does not qualify as progress.
+   - **Cognitive Relief / Laser-Focused Prompts (Round 2+)**: Subsequent remediation attempts are relieved of the cognitive burden of the full original report. The remediation prompt explicitly states:
+     - Already resolved defects (treated as non-interference invariants; do NOT touch or regress).
+     - Target remaining unresolved defects with explicit priority directives for the highest open tier.
+   - **Safe Ratchet Point Fallback**: If an attempt introduces regressions or fails the quality gate, workspace is rolled back to `last_ratchet_sha` (never to `base_sha`), preserving earlier verified gains.
+   - **Bounded Attempts & Partial Remediation Preservation**: Bounded by default to **3 attempts per cycle** (configurable via `--max-attempts N`). If attempts are exhausted and `last_ratchet_sha != base_sha`, the cycle commits and archives the progress as `partial_remediation`, logs the remaining issues for subsequent cycles, and advances without discarding work. Rollback to `base_sha` and `blocked` status occurs only if zero progress was ever achieved across all attempts.
 
 ---
 

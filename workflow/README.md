@@ -12,7 +12,7 @@ It is completely **language-agnostic** and provides native audit profiles, test 
 
 ## Architecture: The 5-Phase Closed-Loop Verification Pipeline
 
-Every review cycle executes an autonomous, transactionally guarded workflow:
+Every review cycle executes an autonomous, transactionally guarded workflow with a Monotonic Progressive Ratchet:
 
 ```text
                   ┌──────────────────────────────────────────────┐
@@ -28,6 +28,7 @@ Every review cycle executes an autonomous, transactionally guarded workflow:
                   │ (bws gw -b fix-branch -- agy-run-wild)       │
                   │  - Gemini Flash: fast (15-30s) bounded edits │
                   │  - Enforce regression test + no atrophy      │
+                  │  - Round 2+: laser-focused cognitive relief  │
                   │  - Auto-squash-merge to branch               │
                   └───────────────────────┬──────────────────────┘
                                           │
@@ -37,31 +38,38 @@ Every review cycle executes an autonomous, transactionally guarded workflow:
                   │ (tools/gate, check.rb, go-audit, test -race) │
                   └───────────────────────┬──────────────────────┘
                                           │
-                             Gate Passed? │ (Failed -> Stash branch, Rollback & Halt)
+                             Gate Passed? │ (Failed -> Restore latest ratchet point)
                                           ▼
                   ┌──────────────────────────────────────────────┐
                   │ Phase 4: Targeted Re-Verification Pass       │
                   │ (tools/audit --verify-remediation)           │
                   │  - Re-invoke SAME auditor (Codex/Claude)     │
-                  │  - Bounded verification on patch vs findings │
+                  │  - Cumulative diff verification: base..HEAD  │
+                  │  - Evaluate 0 regressions & severity ratchet │
                   └───────────────────────┬──────────────────────┘
                                           │
-                     Verified Clean? ─────┼────── Defect Remains / Regressed?
-                            │             │               │
-                            │             ▼               ▼
-                            │      Attempt < 2?     Attempt == 2?
-                            │             │               │
-                            │       (Re-enter P2)   (Stash branch, Rollback & Block)
-                            ▼             │               │
-                  ┌───────────────────────┴───────────────┴──────┐
-                  │ Phase 5: State Update & Clean Advance        │
-                  │  - If clean: mark lens CLEAN, rotate to next │
-                  │  - If blocked: mark lens BLOCKED, halt loop  │
-                  │  - Discard empty commits if false-positive   │
-                  └──────────────────────────────────────────────┘
+            ┌─────────────────────────────┴─────────────────────────────┐
+            │                                                           │
+   Verified Clean (0 defects)                              Partial / Failed / Regressed
+            │                                                           │
+            ▼                                                           ▼
+┌──────────────────────────────────────┐            ┌──────────────────────────────────────┐
+│ Phase 5: Complete & Advance          │            │ Monotonic Progressive Ratchet Check  │
+│  - Mark lens CLEAN, commit & archive │            │  - Lexicographical progress check    │
+│  - Rotate to next profile in cadence │            │    (highest open severity reduced)   │
+└──────────────────────────────────────┘            │  - Regressed / No progress?          │
+                                                    │    Reset to latest ratchet point     │
+                                                    │  - Attempts remaining (< max)?       │
+                                                    │    Re-enter P2 with laser prompt     │
+                                                    │  - Attempts exhausted (>= max)?      │
+                                                    │    * If ratchet > base: commit &     │
+                                                    │      archive partial_remediation     │
+                                                    │    * If ratchet == base: rollback    │
+                                                    │      workspace & mark BLOCKED        │
+                                                    └──────────────────────────────────────┘
 ```
 
-For the theoretical and mathematical foundations behind closed-loop convergence and anti-oscillation, see [`RATIONALE.md`](RATIONALE.md).
+For the theoretical and mathematical foundations behind closed-loop convergence, the Monotonic Progressive Ratchet, and anti-oscillation, see [`RATIONALE.md`](RATIONALE.md).
 
 ---
 

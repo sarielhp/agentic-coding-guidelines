@@ -78,7 +78,8 @@ options = {
   config: nil,
   batch_commits: false,
   branch: nil,
-  strict_tests: false
+  strict_tests: false,
+  max_remediation_attempts: 3
 }
 
 parser = OptionParser.new do |opts|
@@ -114,6 +115,10 @@ parser = OptionParser.new do |opts|
 
   opts.on('-e', '--effort LEVEL', 'Effort level for agy-run-wild (low|medium|high, default: high)') do |e|
     options[:effort] = e
+  end
+
+  opts.on('--max-attempts N', '--max-remediation-attempts N', Integer, 'Maximum remediation attempts per review cycle (default: 3)') do |n|
+    options[:max_remediation_attempts] = n
   end
 
   opts.on('--max-diff-lines N', Integer, 'Maximum diff lines allowed before warning or aborting (default: 800)') do |n|
@@ -401,11 +406,23 @@ class MultiProfileReviewCycle
 
     report_path = File.join(reports_dir, "#{review_num}_#{active_profile}.md")
     base_sha = `git rev-parse HEAD`.strip
+    last_ratchet_sha = base_sha
+    last_ratchet_footprint = nil
+    last_remaining = findings
+    initial_severities = extract_severity_breakdown(review_content)
+    last_severities = initial_severities
+    max_attempts = options[:max_remediation_attempts] || 3
     attempt = 1
     verification_feedback = nil
 
     loop do
       unless remediate_in_sandbox(review_num, active_profile, feedback: verification_feedback, attempt: attempt)
+        if last_ratchet_sha != base_sha
+          puts "\n⚠️ Sandbox remediation failed on attempt #{attempt}. Restoring latest ratchet point...".yellow
+          restore_ratchet_point(last_ratchet_sha)
+          return handle_partial_remediation(review_num, active_profile, model_step, findings, last_remaining,
+                                            footprint: last_ratchet_footprint, p_idx: p_idx, c_idx: c_idx)
+        end
         rollback_workspace(base_sha, "Sandbox remediation (attempt #{attempt}) failed or was discarded", num: review_num, profile: active_profile)
         record_history(review_num, active_profile, model_step, findings, 'failed_sandbox', files_edited: 0)
         print_bottom_summary(
@@ -417,6 +434,12 @@ class MultiProfileReviewCycle
 
       footprint = check_diff_footprint(base_sha, findings: findings)
       if footprint[:aborted]
+        if last_ratchet_sha != base_sha
+          puts "\n⚠️ Diff limit exceeded on attempt #{attempt}. Restoring latest ratchet point...".yellow
+          restore_ratchet_point(last_ratchet_sha)
+          return handle_partial_remediation(review_num, active_profile, model_step, findings, last_remaining,
+                                            footprint: last_ratchet_footprint, p_idx: p_idx, c_idx: c_idx)
+        end
         rollback_workspace(base_sha, footprint[:reason], num: review_num, profile: active_profile)
         record_history(review_num, active_profile, model_step, findings, 'rejected_diff', files_edited: 0)
         print_bottom_summary(
@@ -440,6 +463,12 @@ class MultiProfileReviewCycle
       end
 
       unless verify_quality_gate
+        if last_ratchet_sha != base_sha
+          puts "\n⚠️ Quality gate failed on attempt #{attempt}. Restoring latest ratchet point...".yellow
+          restore_ratchet_point(last_ratchet_sha)
+          return handle_partial_remediation(review_num, active_profile, model_step, findings, last_remaining,
+                                            footprint: last_ratchet_footprint, p_idx: p_idx, c_idx: c_idx)
+        end
         rollback_workspace(base_sha, "Post-merge quality gate verification failed (attempt #{attempt})", num: review_num, profile: active_profile)
         record_history(review_num, active_profile, model_step, findings, 'failed_gate', files_edited: 0)
         print_bottom_summary(
@@ -453,7 +482,7 @@ class MultiProfileReviewCycle
 
       # Phase 4: Targeted Re-Verification Pass
       verification = if options[:skip_diff_audit]
-                       { passed: true, remaining: 0, output: 'Diff verification skipped by flag', details: 'Skipped' }
+                       { passed: true, remaining: 0, output: 'Diff verification skipped by flag', details: 'Skipped', has_new_regressions: false }
                      else
                        run_targeted_verification(active_profile, report_path, base_sha, model_step)
                      end
@@ -477,10 +506,36 @@ class MultiProfileReviewCycle
         return true
       end
 
-      # Verification failed
+      # Progressive Monotonic Ratchet evaluation:
+      remaining = verification[:remaining]
+      has_regressions = verification[:has_new_regressions]
+      current_severities = verification[:severities] || parse_unresolved_severities(verification[:output], verification[:unresolved])
+      made_progress = !has_regressions && evaluate_lexicographical_progress(last_severities, current_severities, last_remaining, remaining)
+
+      if made_progress
+        last_remaining = remaining
+        last_severities = current_severities
+        last_ratchet_sha = `git rev-parse HEAD`.strip
+        last_ratchet_footprint = footprint
+        puts "\n📈 Progressive Ratchet: Reduced open defects to #{remaining}/#{findings} with 0 regressions.".bold.green
+      elsif has_regressions
+        puts "\n⚠️ Attempt #{attempt} introduced regressions. Discarding changes and restoring ratchet point...".bold.red
+        restore_ratchet_point(last_ratchet_sha)
+      else
+        puts "\n⚠️ Attempt #{attempt} made no progress on highest priority open tier (#{remaining} remaining). Discarding attempt...".yellow
+        restore_ratchet_point(last_ratchet_sha)
+      end
+
       attempt += 1
-      if attempt > 2
-        rollback_workspace(base_sha, "Targeted verification failed to converge after 2 attempts: #{verification[:details]}", num: review_num, profile: active_profile)
+      if attempt > max_attempts
+        if last_ratchet_sha != base_sha
+          restore_ratchet_point(last_ratchet_sha)
+          return handle_partial_remediation(review_num, active_profile, model_step, findings, last_remaining,
+                                            footprint: last_ratchet_footprint, diff_audit: verification,
+                                            p_idx: p_idx, c_idx: c_idx)
+        end
+
+        rollback_workspace(base_sha, "Targeted verification failed to converge after #{max_attempts} attempts: #{verification[:details]}", num: review_num, profile: active_profile)
         record_history(review_num, active_profile, model_step, findings, 'blocked', files_edited: 0)
         print_bottom_summary(
           num: review_num, profile: active_profile, model_step: model_step,
@@ -489,11 +544,109 @@ class MultiProfileReviewCycle
         return false
       end
 
-      warn_msg = "\n⚠️ Targeted verification failed (attempt 1/2). Re-attempting remediation with auditor feedback..."
+      warn_msg = "\n⚠️ Targeted verification not yet converged (attempt #{attempt - 1}/#{max_attempts}). Re-attempting remediation with laser-focused feedback..."
       puts warn_msg.bold.yellow
       log_write("#{warn_msg}\n")
-      verification_feedback = verification[:output]
+      verification_feedback = build_ratchet_feedback(verification, attempt, last_severities)
     end
+  end
+
+  def restore_ratchet_point(sha)
+    system('git', 'reset', '--hard', sha)
+    system('git', 'clean', '-fd')
+  end
+
+  def handle_partial_remediation(num, profile, model_step, total_findings, remaining_findings,
+                                 footprint: nil, diff_audit: nil, p_idx: nil, c_idx: nil)
+    resolved_count = total_findings - remaining_findings
+    puts "\n📈 Review Cycle #{num} (#{profile}) PARTIAL REMEDIATION PRESERVED:".bold.yellow
+    puts "   • #{resolved_count}/#{total_findings} defect(s) resolved with zero regressions (quality gate passed).".bold.green
+    puts "   • #{remaining_findings}/#{total_findings} defect(s) remain open and logged.".bold.yellow
+
+    summary_content = generate_post_work_summary(num, profile, model_step, total_findings,
+                                                  footprint: footprint, diff_audit: diff_audit,
+                                                  partial: true, remaining: remaining_findings)
+    output_summary(num, summary_content)
+    advance_state(p_idx, c_idx)
+    archive_artifacts(num) unless options[:keep_reviews]
+    record_history(num, profile, model_step, total_findings, 'partial_remediation',
+                   files_edited: footprint ? footprint[:files]&.size : 0,
+                   remaining: remaining_findings)
+    commit_and_push_cycle(num, profile)
+
+    puts "\n✅ Review Cycle #{num} (#{profile}) partial progress committed and archived.".bold.yellow
+    print_bottom_summary(
+      num: num, profile: profile, model_step: model_step,
+      findings: total_findings, review_content: nil, footprint: footprint, outcome: 'partial_remediation'
+    )
+    true
+  end
+
+  def parse_unresolved_severities(verification_output, unresolved_text)
+    counts = { 'severe' => 0, 'major' => 0, 'medium' => 0, 'minor' => 0, 'other' => 0 }
+    if verification_output =~ /\[UNRESOLVED SEVERITIES\]:\s*([^\n]+)/i
+      line = $1.strip
+      if line !~ /none|0\s+unresolved|clean/i
+        counts['severe'] += $1.to_i if line =~ /crit(?:ical)?:\s*(\d+)/i
+        counts['major']  += $1.to_i if line =~ /maj(?:or)?:\s*(\d+)/i
+        counts['medium'] += $1.to_i if line =~ /mod(?:erate)?:\s*(\d+)/i || line =~ /med(?:ium)?:\s*(\d+)/i
+        counts['minor']  += $1.to_i if line =~ /min(?:or)?:\s*(\d+)/i
+      end
+      return counts if counts.values.sum.positive?
+    end
+
+    if unresolved_text && !unresolved_text.empty?
+      breakdown = extract_severity_breakdown(unresolved_text)
+      return breakdown if breakdown.values.sum.positive?
+    end
+
+    counts
+  end
+
+  def evaluate_lexicographical_progress(old_breakdown, new_breakdown, old_remaining, new_remaining)
+    return false if new_remaining >= old_remaining
+
+    [:severe, :major, :medium, :minor, :other].each do |tier|
+      old_count = old_breakdown[tier.to_s] || 0
+      new_count = new_breakdown[tier.to_s] || 0
+      next if old_count.zero? && new_count.zero?
+
+      if old_count.positive?
+        return new_count < old_count
+      end
+    end
+
+    new_remaining < old_remaining
+  end
+
+  def build_ratchet_feedback(verification, attempt, severities = {})
+    resolved = verification[:resolved] || 'Previous findings'
+    unresolved = verification[:unresolved] || verification[:details]
+    remaining = verification[:remaining] || 1
+
+    highest_tier = if (severities['severe'] || 0).positive?
+                     'CRITICAL'
+                   elsif (severities['major'] || 0).positive?
+                     'MAJOR'
+                   elsif (severities['medium'] || 0).positive?
+                     'MODERATE'
+                   else
+                     'HIGH'
+                   end
+
+    priority_directive = "PRIORITY DIRECTIVE: You MUST focus on remediating the #{highest_tier} unresolved defect(s) first."
+
+    {
+      directive: priority_directive,
+      remaining_count: remaining,
+      resolved_summary: resolved,
+      unresolved_summary: unresolved,
+      feedback_text: "Targeted verification pass (attempt #{attempt - 1}) reported #{remaining} unresolved defect(s):\n" \
+                     "UNRESOLVED FINDINGS:\n#{unresolved}\n" \
+                     "ALREADY RESOLVED (DO NOT BREAK OR TOUCH):\n#{resolved}\n" \
+                     "#{priority_directive}\n" \
+                     "Non-interference invariant: Ensure all existing regression tests pass and no regressions are introduced."
+    }
   end
 
   def init_cycle_log(num, profile, model_step)
@@ -1056,24 +1209,40 @@ class MultiProfileReviewCycle
     gate_note = resolve_gate_cmd ? " and verify with #{resolve_gate_cmd}" : ''
     guide_note = guideline_instructions
     anti_oscillation = recent_mitigations_context
-    oscillation_note = anti_oscillation.empty? ? '' : " 5. Anti-Oscillation: #{anti_oscillation}"
-    feedback_note = feedback ? " 6. Verification Feedback (Attempt #{attempt}): Previous verification pass reported: #{feedback}. Fix these remaining issues and ensure regression test validates them." : ''
+    oscillation_note = anti_oscillation.empty? ? '' : " Anti-Oscillation: #{anti_oscillation}."
 
-    <<~PROMPT.strip.gsub(/\s+/, ' ')
-      /goal Create an architectural plan in #{plan_path} addressing genuine defects from #{report_path},
-      implement fixes across the codebase, and verify all quality checks pass cleanly. Focus area: #{profile} audit.
-      INVARIANTS:
-      1. Triage First: Evaluate each finding in #{report_path}. If all findings are invalid false positives
-      or intentional design behavior, document the technical rationale in #{plan_path} and summary without modifying code or tests.
-      2. Targeted Fixes & Mandatory Tests: For each genuine defect, implement the minimal, idiomatic fix and add or update at least
-      one regression unit test validating the fix. If code is modified, regression tests are strictly mandatory. Keep changes scoped strictly to the reported issues.
-      3. Quality Gate & Metrics: Run `tools/gate`#{gate_note} frequently and ensure all tests pass.
-      Every new or modified method MUST satisfy code metrics: method length <= 80 lines (or <= 120 lines if cognitive complexity <= 5),
-      cognitive complexity <= 15, and nesting depth <= 4.#{guide_note}
-      4. Scope Containment: Do not refactor unaffected modules or modify external CLI behavior unless required by the report.#{oscillation_note}#{feedback_note}
-      Save plan to #{plan_path}, author post-work summary to #{summary_path} (stating issue, status/mitigation, and verification),
-      and commit all work when complete.
-    PROMPT
+    if attempt > 1 && feedback.is_a?(Hash)
+      <<~PROMPT.strip.gsub(/\s+/, ' ')
+        /goal Laser-focused remediation (Attempt #{attempt}): #{feedback[:directive]}
+        Address the remaining #{feedback[:remaining_count]} unresolved defect(s) from previous verification pass in #{plan_path} and codebase.
+        INVARIANTS:
+        1. Target Unresolved Findings Exclusively: Focus ONLY on: #{feedback[:unresolved_summary]}.
+        2. Non-Interference: The current branch already resolves: #{feedback[:resolved_summary]}. Do NOT touch, revert, or break those functions or their tests.
+        3. Mandatory Regression Tests: Add or update regression unit tests validating the targeted fix.
+        4. Quality Gate & Metrics: Run `tools/gate`#{gate_note} frequently and ensure all tests pass.
+        Maintain complexity (depth <= 4, branches <= 15) and sizing limits.#{guide_note}#{oscillation_note}
+        Save updated plan to #{plan_path}, post-work summary to #{summary_path}, and commit all work when complete.
+      PROMPT
+    else
+      feedback_text = feedback.is_a?(Hash) ? feedback[:feedback_text] : feedback
+      feedback_note = feedback_text ? " 6. Verification Feedback: #{feedback_text}." : ''
+
+      <<~PROMPT.strip.gsub(/\s+/, ' ')
+        /goal Create an architectural plan in #{plan_path} addressing genuine defects from #{report_path},
+        implement fixes across the codebase, and verify all quality checks pass cleanly. Focus area: #{profile} audit.
+        INVARIANTS:
+        1. Triage First: Evaluate each finding in #{report_path}. If all findings are invalid false positives
+        or intentional design behavior, document the technical rationale in #{plan_path} and summary without modifying code or tests.
+        2. Targeted Fixes & Mandatory Tests: For each genuine defect, implement the minimal, idiomatic fix and add or update at least
+        one regression unit test validating the fix. If code is modified, regression tests are strictly mandatory. Keep changes scoped strictly to the reported issues.
+        3. Quality Gate & Metrics: Run `tools/gate`#{gate_note} frequently and ensure all tests pass.
+        Every new or modified method MUST satisfy code metrics: method length <= 80 lines (or <= 120 lines if cognitive complexity <= 5),
+        cognitive complexity <= 15, and nesting depth <= 4.#{guide_note}
+        4. Scope Containment: Do not refactor unaffected modules or modify external CLI behavior unless required by the report.#{oscillation_note}#{feedback_note}
+        Save plan to #{plan_path}, author post-work summary to #{summary_path} (stating issue, status/mitigation, and verification),
+        and commit all work when complete.
+      PROMPT
+    end
   end
 
   def remediate_in_sandbox(num, profile, feedback: nil, attempt: 1)
@@ -1297,10 +1466,26 @@ class MultiProfileReviewCycle
                 output[/\[UNRESOLVED FINDINGS\]:\s*([^\n]+)/i, 1] || output[/\[FAILURE DETAILS\]:\s*([^\n]+)/i, 1] || 'Unresolved defects in patch'
               end
 
-    { passed: passed && remaining.zero?, remaining: remaining, output: output, details: details }
+    resolved_match = output[/\[RESOLVED FINDINGS\]:\s*(.+?)(?=\n\s*\[|\Z)/im, 1]&.strip
+    unresolved_match = output[/\[UNRESOLVED FINDINGS\]:\s*(.+?)(?=\n\s*\[|\Z)/im, 1]&.strip
+    regressions_match = output[/\[NEW REGRESSIONS\]:\s*(.+?)(?=\n\s*\[|\Z)/im, 1]&.strip
+    has_regressions = regressions_match && regressions_match !~ /none|0\s+new|clean/i
+    severities = parse_unresolved_severities(output, unresolved_match)
+
+    {
+      passed: passed && remaining.zero?,
+      remaining: remaining,
+      output: output,
+      details: details,
+      resolved: resolved_match,
+      unresolved: unresolved_match,
+      regressions: regressions_match,
+      has_new_regressions: has_regressions,
+      severities: severities
+    }
   rescue StandardError => e
     warn "  ⚠️ Targeted verification error: #{e.message}".yellow
-    { passed: false, remaining: 1, output: e.message, details: e.message }
+    { passed: false, remaining: 1, output: e.message, details: e.message, has_new_regressions: false, severities: {} }
   end
 
   def verify_quality_gate
@@ -1322,22 +1507,25 @@ class MultiProfileReviewCycle
     system(cmd)
   end
 
-  def generate_post_work_summary(num, profile, model_step, findings, footprint: nil, diff_audit: nil)
+  def generate_post_work_summary(num, profile, model_step, findings, footprint: nil, diff_audit: nil, partial: false, remaining: 0)
     FileUtils.mkdir_p(reports_dir)
     root_summary = "#{num}_summary.md"
     summary_path = "#{reports_dir}/#{num}_summary.md"
 
     FileUtils.mv(root_summary, summary_path) if File.exist?(root_summary) && !File.exist?(summary_path)
 
-    content = if File.exist?(summary_path) && !File.read(summary_path).strip.empty?
+    content = if !partial && File.exist?(summary_path) && !File.read(summary_path).strip.empty?
                 append_summary_metadata(File.read(summary_path), footprint, diff_audit)
               else
-                build_summary(num, profile, model_step, findings, footprint: footprint, diff_audit: diff_audit)
+                build_summary(num, profile, model_step, findings,
+                              footprint: footprint, diff_audit: diff_audit,
+                              partial: partial, remaining: remaining)
               end
 
     File.write(summary_path, content)
     system('git', 'add', summary_path)
-    system('git', 'commit', '-m', "docs: add post-work summary #{num} (#{profile})")
+    commit_suffix = partial ? ' (partial)' : ''
+    system('git', 'commit', '-m', "docs: add post-work summary #{num} (#{profile}#{commit_suffix})")
     content
   end
 
@@ -1441,12 +1629,15 @@ class MultiProfileReviewCycle
 
   def format_status_label(outcome)
     case outcome
-    when 'remediated'      then 'Remediated & Verified (Quality Gate Passed)'.bold.green
-    when 'clean'           then 'Clean (Zero Defects Detected)'.bold.green
-    when 'failed_sandbox'  then 'Remediation Failed in Sandbox (Rolled Back)'.bold.red
-    when 'failed_gate'     then 'Quality Gate Failed Post-Merge (Rolled Back)'.bold.red
-    when 'rejected_diff'   then 'Diff Footprint Exceeded (Rolled Back)'.bold.red
-    when 'dry_run'         then 'Dry Run (No Changes Applied)'.bold.yellow
+    when 'remediated'           then 'Remediated & Verified (Quality Gate Passed)'.bold.green
+    when 'partial_remediation'  then 'Partially Remediated & Verified (Remaining Logged)'.bold.yellow
+    when 'clean'                then 'Clean (Zero Defects Detected)'.bold.green
+    when 'false_positive_triage' then 'Triaged (All Defects Validated False Positives)'.bold.cyan
+    when 'failed_sandbox'       then 'Remediation Failed in Sandbox (Rolled Back)'.bold.red
+    when 'failed_gate'          then 'Quality Gate Failed Post-Merge (Rolled Back)'.bold.red
+    when 'rejected_diff'        then 'Diff Footprint Exceeded (Rolled Back)'.bold.red
+    when 'dry_run'              then 'Dry Run (No Changes Applied)'.bold.yellow
+    when 'blocked'              then 'Blocked (Verification Failed to Converge)'.bold.red
     else outcome.to_s.capitalize.yellow
     end
   end
@@ -1520,7 +1711,7 @@ class MultiProfileReviewCycle
     puts "#{sep}\n"
   end
 
-  def build_summary(num, profile, model_step, findings, footprint: nil, diff_audit: nil)
+  def build_summary(num, profile, model_step, findings, footprint: nil, diff_audit: nil, partial: false, remaining: 0)
     plan_file = Dir.glob("#{reports_dir}/#{num}*plan*.md").first
     report_file = Dir.glob("#{reports_dir}/#{num}_#{profile}.md").first ||
                   Dir.glob("#{reports_dir}/#{num}*.md").reject { |f| f =~ /plan|summary/ }.first
@@ -1529,6 +1720,8 @@ class MultiProfileReviewCycle
     issues = extract_issues_from_report(report_file) if issues.empty?
 
     count = issues.any? ? issues.size : findings
+    status_str = partial ? "Partially Remediated (#{count - remaining}/#{count} resolved, #{remaining} remaining)" : 'Remediated & Verified'
+
     lines = [
       "# Review Cycle #{num} Summary (Lens: #{profile})",
       '',
@@ -1536,13 +1729,17 @@ class MultiProfileReviewCycle
       "- **Focus Lens**: `#{profile}`",
       "- **Auditor**: #{model_step[:label]}",
       "- **Issues Found**: #{count}",
-      "- **Status**: Remediated & Verified"
+      "- **Status**: #{status_str}"
     ]
     if footprint && footprint[:stat] && !footprint[:stat].empty?
       lines << "- **Footprint**: #{footprint[:stat]}"
     end
     if diff_audit
-      audit_label = diff_audit[:findings].zero? ? 'Clean (0 defects in diff)' : "#{diff_audit[:findings]} warning(s)"
+      audit_label = if partial
+                      "#{remaining} defect(s) remaining"
+                    else
+                      diff_audit[:findings]&.zero? ? 'Clean (0 defects in diff)' : "#{diff_audit[:findings]} warning(s)"
+                    end
       lines << "- **Differential Audit**: #{audit_label}"
     end
     lines << ''
@@ -1558,6 +1755,13 @@ class MultiProfileReviewCycle
         lines << "#{i + 1}. **Issue**: #{it[:desc]}#{loc_part}"
         lines << "   - **Mitigation**: #{it[:rem]}"
       end
+    end
+
+    if partial && diff_audit && diff_audit[:unresolved] && !diff_audit[:unresolved].empty?
+      lines << ''
+      lines << '## Remaining Unresolved Issues'
+      lines << ''
+      lines << diff_audit[:unresolved]
     end
 
     lines.join("\n") + "\n"
@@ -1698,7 +1902,7 @@ class MultiProfileReviewCycle
     puts "Review #{num} artifacts safely archived in #{arch_path}/ (untracked by git).".green
   end
 
-  def record_history(num, profile, model_step, findings, outcome, files_edited: nil)
+  def record_history(num, profile, model_step, findings, outcome, files_edited: nil, remaining: nil)
     @state['history'] ||= []
     summary_loc = options[:keep_reviews] ? "#{reports_dir}/#{num}_summary.md" : "#{reports_dir}/archive/#{num}_summary.md"
     entry = {
@@ -1713,7 +1917,8 @@ class MultiProfileReviewCycle
       'timestamp' => Time.now.utc.iso8601
     }
     entry['files_edited'] = files_edited unless files_edited.nil?
-    entry['summary'] = summary_loc if outcome == 'remediated'
+    entry['remaining'] = remaining unless remaining.nil?
+    entry['summary'] = summary_loc if outcome == 'remediated' || outcome == 'partial_remediation'
     @state['history'] << entry
     save_state
   end

@@ -78,3 +78,32 @@ A major flaw in naive review engines is enforcing file-name heuristics that igno
 * **Rust Inline Tests (`#[cfg(test)]`)**: In idiomatic Rust, unit tests are collocated in the same file as the production code (`src/parser.rs` containing `#[cfg(test)] mod tests { ... }`). Checking only for `tests/**/*.rs` falsely rejects legitimate Rust bug fixes.
 * **Ruby Collocation & DSLs**: Ruby testing spans Minitest (`test/test_*.rb`) and RSpec (`spec/**/*_spec.rb`), and tests can be defined via `def test_*` or block DSLs (`it "..."`).
 * **Assertion Atrophy**: Agents frequently "fix" failing tests by inserting skips (`t.Skip()`, `#[ignore]`, `skip`) or deleting assertions. Detecting and banning assertion atrophy is mandatory across all supported languages.
+
+---
+
+## 6. The All-or-Nothing Fallacy & The Monotonic Progressive Ratchet
+
+Early automated remediation systems operated under a binary all-or-nothing model: if a review reported 5 defects, and the remediation successfully resolved 4 defects with comprehensive tests but left 1 partially unaddressed, the runner discarded the entire patch, executed `git reset --hard`, and marked the cycle failed or blocked.
+
+Empirically, this all-or-nothing approach exhibits severe pathologies:
+
+### A. The Sunk Cost of Discarded Improvements
+A patch that resolves 4 out of 5 defects, passes all unit tests, passes AST cognitive complexity linters, and introduces zero regressions is strictly mathematically superior to the pre-cycle commit. Wiping it out discards verified engineering value, creates livelock where subsequent attempts struggle to re-solve all 5 defects simultaneously, and wastes immense compute.
+
+### B. The Lexicographical Priority Invariant
+If partial progress is retained, how do we prevent agents from gaming the ratchet by fixing trivial minor issues while evading difficult critical flaws?
+Progress must be governed by a **Lexicographical Severity Invariant**:
+$$(\Delta N_{\text{Crit}}, \Delta N_{\text{Maj}}, \Delta N_{\text{Mod}}) > 0$$
+
+If there are open Critical defects, progress **must** reduce the count of open Critical defects ($N_{\text{Crit}}^{\text{new}} < N_{\text{Crit}}^{\text{old}}$). An attempt that resolves 2 Moderate findings but fails to reduce open Critical issues is rejected and discarded. Only when Critical issues are 0 does reduction in Major issues qualify as progress, and so forth down the hierarchy.
+
+### C. Cognitive Relief & Laser-Focused Prompts in Round 2+
+When an agent attempts remediation with 5 defects across 6 files in its context, its attention and reasoning budget are diffused. When 4 of those defects are verified resolved, feeding the entire original 5-defect prompt back into Round 2 triggers two failure modes:
+1. **Context Clutter**: The model re-analyzes already-fixed code, wasting tokens and reasoning capacity.
+2. **Blast Radius & Re-regression**: The model attempts to "improve" or refactor the already-fixed functions, frequently breaking the tests authored in Round 1.
+
+By stripping resolved findings and presenting a **laser-focused prompt** targeting *only* the remaining defect—while explicitly stating the non-interference invariant on already-resolved code—Round 2 gives the agent the cognitive relief needed to solve complex edge cases cleanly.
+
+### D. Safe Ratchet Point Preservation
+If late-round attempts introduce regressions or fail to converge within the attempt ceiling (default 3), the repository does not roll back to the base SHA. It resets cleanly to `last_ratchet_sha`—the latest verified state that passed the quality gate with zero regressions. The cycle records `outcome: 'partial_remediation'`, commits and archives the verified progress, logs the remaining open issues in the summary, and advances. Progress is monotonic and permanent.
+
