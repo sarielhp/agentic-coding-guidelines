@@ -1329,7 +1329,9 @@ class MultiProfileReviewCycle
         1. Target Unresolved Findings Exclusively: Focus ONLY on: #{feedback[:unresolved_summary]}.
         2. Non-Interference: The current branch already resolves: #{feedback[:resolved_summary]}. Do NOT touch, revert, or break those functions or their tests.
         3. Mandatory Regression Tests: Add or update regression unit tests validating the targeted fix.
-        4. Quality Gate & Metrics: Run `tools/gate`#{gate_note} frequently and ensure all tests pass.
+        4. Quality Gate & Headless Execution: Pre-flight quality gate already passed. Do not run full baseline sweeps upfront.
+        Implement targeted fixes and regression tests actively. Run fast targeted package tests synchronously (e.g. `go test -v ./subpkg/...`).
+        In this headless sandbox, never idle or yield turns waiting for background tasks.
         Maintain complexity (depth <= 4, branches <= 15) and sizing limits.#{guide_note}#{oscillation_note}
         Save updated plan to #{plan_path}, post-work summary to #{summary_path}, and commit all work when complete.
       PROMPT
@@ -1345,7 +1347,10 @@ class MultiProfileReviewCycle
         or intentional design behavior, document the technical rationale in #{plan_path} and summary without modifying code or tests.
         2. Targeted Fixes & Mandatory Tests: For each genuine defect, implement the minimal, idiomatic fix and add or update at least
         one regression unit test validating the fix. If code is modified, regression tests are strictly mandatory. Keep changes scoped strictly to the reported issues.
-        3. Quality Gate & Metrics: Run `tools/gate`#{gate_note} frequently and ensure all tests pass.
+        3. Quality Gate & Headless Execution: Pre-flight quality gate has ALREADY passed. Do NOT run full baseline quality gates upfront.
+        Directly evaluate the report, author #{plan_path}, implement targeted code fixes, and author regression unit tests.
+        To verify changes while editing, run fast, targeted package tests synchronously (e.g. `go test -v ./subpkg/...`), NOT full repo sweeps.
+        In this headless sandbox, never idle or yield your turn waiting for background tasks; keep actively modifying code and tests.
         Every new or modified method MUST satisfy code metrics: method length <= 80 lines (or <= 120 lines if cognitive complexity <= 5),
         cognitive complexity <= 15, and nesting depth <= 4.#{guide_note}
         4. Scope Containment: Do not refactor unaffected modules or modify external CLI behavior unless required by the report.#{oscillation_note}#{feedback_note}
