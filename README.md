@@ -39,7 +39,7 @@ Raw line counts are a crude proxy for code clarity. **Cognitive complexity** (ne
    - Never extract artificial continuation fragments (`stepA`, `stepB`).
    - Never extract helpers that require parameter dumping ($>4$ parameters or pointers/clones to pass local state).
    - In Rust: **Never insert `.clone()` or wrap in synchronization primitives solely to resolve borrow checker conflicts during function extraction**.
-6. **Closed-Loop Adversarial Verification**: Continuous automated code quality audits across 6 orthogonal domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`), paired with transactionally safe remediation in isolated Git sandboxes ([`bws`](https://github.com/sarielhp/bws)), targeted re-verification with circuit breakers, and an asymmetric model architecture (Codex/Claude auditors + Gemini Flash remediators).
+6. **Closed-Loop Adversarial Review**: Continuous automated code quality audits across 6 orthogonal domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`), paired with transactionally safe remediation in isolated Git sandboxes ([`bws`](https://github.com/sarielhp/bws)) and a 4:2:1 model tier rotation.
 
 ---
 
@@ -89,15 +89,13 @@ agentic-coding-guidelines/
 │       ├── Makefile.snippet  # Standard Makefile targets
 │       ├── check.rb          # Pre-commit CI quality gate
 │       ├── commit.rb         # Gated commit with .verified_head
-│       └── bump.rb           # Semver bump & tag script
+│       ├── bump.rb           # Semver bump & tag script
 │       └── .rubocop.yml      # Balanced RuboCop configuration
 └── workflow/                 # Autonomous Review & Remediation Loop (review-cycle)
-    ├── README.md             # Architecture, 5-phase closed-loop verification spec
-    ├── GUIDELINES.md         # Operational rules, invariants & lifecycle contracts
-    ├── RATIONALE.md          # Empirical rationale, anti-oscillation, & model pairing
+    ├── README.md             # Architecture, 5-phase loop & 4:2:1 cadence spec
     ├── bin/                  # Autonomous orchestration binaries
     │   ├── review_cycle      # 5-phase closed-loop orchestration engine
-    │   └── audit             # Multi-lens adversarial code auditor & verifier
+    │   └── audit             # Multi-lens adversarial code auditor (6 domain profiles)
     └── templates/            # Project configuration templates
         ├── review_cycle.json # Standard repository contract template
         └── AGENTS_SNIPPET.md # Drop-in documentation block for AGENTS.md

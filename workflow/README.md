@@ -1,111 +1,85 @@
-# Autonomous Review & Closed-Loop Remediation Workflow
+# Autonomous Review & Remediation Workflow
 
-[![Workflow Guidelines](https://img.shields.io/badge/Workflow-Guidelines-00ADD8?style=flat)](GUIDELINES.md)
-[![Workflow Rationale](https://img.shields.io/badge/Workflow-Rationale-8A2BE2?style=flat)](RATIONALE.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
+The `workflow` subsystem defines the authoritative architecture, tooling, and closed-loop engine for **autonomous adversarial code review, planning, sandbox remediation, and quality gate verification**.
 
-The `workflow` subsystem defines the authoritative architecture, tooling, and closed-loop engine for **autonomous adversarial code review, planning, sandbox remediation, quality gate verification, and targeted re-verification**.
-
-It is completely **language-agnostic** and provides native audit profiles, test detection, and AST complexity gate integrations for **Go**, **Rust**, and **Ruby**.
+It is completely **language-agnostic** and provides native audit profiles and auto-detection for **Rust**, **Go**, **Ruby**, and generic repositories.
 
 ---
 
-## Architecture: The 5-Phase Closed-Loop Verification Pipeline
+## Architecture: The 5-Phase Closed Loop
 
-Every review cycle executes an autonomous, transactionally guarded workflow with a Monotonic Progressive Ratchet:
+Every review cycle executes an autonomous, transactionally guarded workflow:
 
 ```text
-                  ┌──────────────────────────────────────────────┐
-                  │ Phase 1: Deep Adversarial Audit              │
-                  │   systems / performance  ──> Codex (Tier 1)  │
-                  │   security / correctness ──> Claude (Tier 1) │
-                  └───────────────────────┬──────────────────────┘
-                                          │
-                             Defects > 0? │ (0 defects -> mark lens CLEAN & advance)
-                                          ▼
-                  ┌──────────────────────────────────────────────┐
-                  │ Phase 2: Rapid Sandbox Remediation           │
-                  │ (bws gw -b fix-branch -- agy-run-wild)       │
-                  │  - Gemini Flash: fast (15-30s) bounded edits │
-                  │  - Enforce regression test + no atrophy      │
-                  │  - Round 2+: laser-focused cognitive relief  │
-                  │  - Auto-squash-merge to branch               │
-                  └───────────────────────┬──────────────────────┘
-                                          │
-                                          ▼
-                  ┌──────────────────────────────────────────────┐
-                  │ Phase 3: Deterministic Quality Gate          │
-                  │ (tools/gate, check.rb, go-audit, test -race) │
-                  └───────────────────────┬──────────────────────┘
-                                          │
-                             Gate Passed? │ (Failed -> Restore latest ratchet point)
-                                          ▼
-                  ┌──────────────────────────────────────────────┐
-                  │ Phase 4: Targeted Re-Verification Pass       │
-                  │ (tools/audit --verify-remediation)           │
-                  │  - Re-invoke SAME auditor (Codex/Claude)     │
-                  │  - Cumulative diff verification: base..HEAD  │
-                  │  - Evaluate 0 regressions & severity ratchet │
-                  └───────────────────────┬──────────────────────┘
-                                          │
-            ┌─────────────────────────────┴─────────────────────────────┐
-            │                                                           │
-   Verified Clean (0 defects)                              Partial / Failed / Regressed
-            │                                                           │
-            ▼                                                           ▼
-┌──────────────────────────────────────┐            ┌──────────────────────────────────────┐
-│ Phase 5: Complete & Advance          │            │ Monotonic Progressive Ratchet Check  │
-│  - Mark lens CLEAN, commit & archive │            │  - Lexicographical progress check    │
-│  - Rotate to next profile in cadence │            │    (highest open severity reduced)   │
-└──────────────────────────────────────┘            │  - Regressed / No progress?          │
-                                                    │    Reset to latest ratchet point     │
-                                                    │  - Attempts remaining (< max)?       │
-                                                    │    Re-enter P2 with laser prompt     │
-                                                    │  - Attempts exhausted (>= max)?      │
-                                                    │    * If ratchet > base: commit &     │
-                                                    │      archive partial_remediation     │
-                                                    │    * If ratchet == base: rollback    │
-                                                    │      workspace & mark BLOCKED        │
-                                                    └──────────────────────────────────────┘
+                  ┌─────────────────────────────────────────┐
+                  │ Phase 1: Multi-Lens Adversarial Audit   │
+                  │ (tools/audit: systems/security/...)     │
+                  └───────────────────┬─────────────────────┘
+                                      │
+                         Defects > 0? │ (0 defects -> record clean & finish)
+                                      ▼
+                  ┌─────────────────────────────────────────┐
+                  │ Phase 2: Isolated Sandbox Remediation   │
+                  │   (bws gw -b fix-branch -- agy...)      │
+                  │    - Formulate architectural plan       │
+                  │    - Apply code fixes                   │
+                  │    - Author unit regression tests       │
+                  │    - Auto-squash-merge to branch        │
+                  └───────────────────┬─────────────────────┘
+                                      │
+                                      ▼
+                  ┌─────────────────────────────────────────┐
+                  │ Phase 3: Quality Gate Verification      │
+                  │   (tools/gate, GATE_CMD, or check)      │
+                  │   - Automatic rollback if gate fails    │
+                  │   - Optional: rebuild/reinstall binary  │
+                  └───────────────────┬─────────────────────┘
+                                      │
+                                      ▼
+                  ┌─────────────────────────────────────────┐
+                  │ Phase 4: Verification & Summary         │
+                  │   - Inspect diff footprint (max-diff)   │
+                  │   - Differential re-audit on patch      │
+                  │   - Format reviews/<NUM>_summary.md     │
+                  └───────────────────┬─────────────────────┘
+                                      │
+                                      ▼
+                  ┌─────────────────────────────────────────┐
+                  │ Phase 5: Archiving & Git Sync           │
+                  │   - Move artifacts to reviews/archive/  │
+                  │   - Persist state (reviews/state.json)  │
+                  │   - git commit & git push (optional)    │
+                  └─────────────────────────────────────────┘
 ```
-
-For the theoretical and mathematical foundations behind closed-loop convergence, the Monotonic Progressive Ratchet, and anti-oscillation, see [`RATIONALE.md`](RATIONALE.md).
 
 ---
 
 ## The 6 Multi-Lens Audit Profiles
 
-Evaluation is strictly partitioned across 6 orthogonal domain lenses:
+The engine evaluates source code across 6 specialized domain lenses:
 
 | Profile | Domain Pillar | Primary Focus Area | Backend Affinity |
 | :--- | :--- | :--- | :--- |
-| **`systems`** | Systems & Concurrency | Deadlocks, race conditions, atomic writes, memory safety, async task cancellation leaks | Codex (`gpt-5.6-sol`) |
-| **`security`** | Security & Attack Surface | Path traversal, shell/macro injection, ReDoS, credential leaks, unbounded network buffers | Claude (`sonnet` / `opus`) |
-| **`correctness`** | Domain Specifications | Specification conformance, format idempotency, lossy field conversions, zero values | Claude (`sonnet` / `opus`) |
-| **`resilience`** | Resilience & Observability | Network timeouts, HTTP 429/503 retry backoff with jitter, silent error swallowing (`.ok()`, `_ =`) | Claude (`sonnet` / `opus`) |
-| **`performance`** | Complexity & Allocations | $O(N^2)$ algorithmic comparisons, excessive heap allocations in hot loops, unbuffered I/O | Codex (`gpt-5.6-sol`) |
-| **`cli`** | Ergonomics & Help System | One canonical interface, anti-alias-bloat, concise `-h` ($\le 20$ lines), exit code hygiene | Claude (`sonnet`) |
+| **`systems`** | Systems & Concurrency | Deadlocks, race conditions, atomic writes, memory safety, async task cancellation leaks | Codex / Claude |
+| **`security`** | Security & Attack Surface | Path traversal, shell/macro injection, ReDoS, credential leaks, unbounded network buffers | Claude |
+| **`correctness`** | Domain Specifications | Specification conformance, format idempotency, lossy field conversions, zero values | Claude |
+| **`resilience`** | Resilience & Observability | Network timeouts, HTTP 429/503 retry backoff with jitter, silent error swallowing (`.ok()`) | Claude |
+| **`performance`** | Complexity & Allocations | $O(N^2)$ algorithmic comparisons, excessive heap allocations in hot loops, unbuffered I/O | Codex |
+| **`cli`** | Ergonomics & Help System | One canonical interface, anti-alias-bloat, concise `-h` ($\le 20$ lines), exit code hygiene | Claude |
 
 ---
 
-## Asymmetric Model Architecture
+## 4:2:1 Pyramid Model Cadence
 
-We pair high-reasoning models with fast, tool-integrated sandbox agents:
-1. **Auditing & Re-Verification (Discovery & Proof)**: **Tier 1 Codex & Claude**. Audit and verification require broad context analysis and deep reasoning. Profile affinity routes `systems`/`performance` to Codex and `security`/`correctness` to Claude.
-2. **Remediation (Implementation)**: **Gemini Flash (`agy-run-wild`)** inside [`bws gw`](https://github.com/sarielhp/bws). Once a defect is localized, Gemini Flash executes surgical edits and updates unit tests in 15–30 seconds.
-3. **Oracle (Deterministic Ground Truth)**: Compilers, unit test suites, and AST complexity linters (`tools/check.rb`, `go-audit`, `rust-audit`, `ruby-audit`).
+To balance deep reasoning against token cost, `review_cycle` rotates models across a 7-step sequence:
 
----
+$$\text{Cadence} = [\text{Flash}, \text{Flash}, \text{Tier 1}, \text{Flash}, \text{Flash}, \text{Tier 1}, \text{Tier 2}]$$
 
-## Multi-Language Support: Go, Rust & Ruby
+- **Tier 0 (Gemini 3.8 Flash)**: Ultra-fast workhorse for high-frequency defect discovery at zero marginal cost.
+- **Tier 1 (Claude 3.7 Sonnet / Codex)**: Balanced reasoning model for architectural and systems analysis.
+- **Tier 2 (Claude 3.7 Opus / GPT-5.6-Sol)**: Flagship deep-reasoning model for complex audits.
 
-The engine automatically detects the project language and enforces corresponding repository standards:
-
-| Language | Manifest | Authoritative Standards | Gate Tools | Test Conventions |
-| :--- | :--- | :--- | :--- | :--- |
-| **Go** | `go.mod` | [`standards/go/GUIDELINES.md`](../go/GUIDELINES.md) | `go-audit`, `go vet`, `go test -race` | `*_test.go` |
-| **Rust** | `Cargo.toml` | [`standards/rust/GUIDELINES.md`](../rust/GUIDELINES.md) | `rust-audit`, `clippy`, `cargo test` | `tests/**/*.rs`, `*_test.rs`, inline `#[cfg(test)]` |
-| **Ruby** | `Gemfile` / `lib/` | [`standards/ruby/GUIDELINES.md`](../ruby/GUIDELINES.md) | `ruby-audit`, `rubocop`, `rake test` | `test/**/test_*.rb`, `spec/**/*_spec.rb`, inline `def test_` |
+Because the **6 audit lenses** and the **7 cadence steps** are coprime ($\gcd(6, 7) = 1$), every lens is audited by every model tier across a 42-cycle non-repeating sequence. State is persisted atomically in `reviews/state.json`.
 
 ---
 
@@ -113,12 +87,10 @@ The engine automatically detects the project language and enforces corresponding
 
 ```text
 ~/prog/standards/workflow/  (also symlinked as ~/prog/standards/review-cycle/)
-├── README.md               # Overview & quickstart guide
-├── GUIDELINES.md           # Operational rules, invariants & lifecycle contracts
-├── RATIONALE.md            # Empirical rationale, anti-oscillation, & model pairing
+├── README.md               # Architecture, invariants & quickstart guide
 ├── bin/
-│   ├── review_cycle        # 5-phase closed-loop orchestration engine
-│   └── audit               # Multi-lens adversarial code auditor & verifier
+│   ├── review_cycle        # Canonical 5-phase orchestration engine
+│   └── audit               # Multi-lens adversarial code auditor
 └── templates/
     ├── review_cycle.json   # Standard repository configuration contract
     └── AGENTS_SNIPPET.md   # Documentation snippet for project AGENTS.md
@@ -138,22 +110,31 @@ ln -sf ~/prog/standards/workflow/bin/review_cycle tools/review_cycle
 ln -sf ~/prog/standards/workflow/bin/audit tools/audit
 ```
 
-### 2. Onboard Automatically via `--setup`
+### 2. Add Configuration (`tools/review_cycle.json`)
 
-Run the onboard command in your repository:
+Create `tools/review_cycle.json` (or in repository root):
 
-```bash
-./tools/review_cycle --setup
+```json
+{
+  "target": "src",
+  "gate_cmd": "tools/gate",
+  "build_cmd": "tools/install",
+  "audit_cmd": "tools/audit",
+  "guidelines": "Adhere strictly to architectural and cognitive complexity standards (depth <= 4, branches <= 15, tiered function limits).",
+  "max_diff_lines": 800
+}
 ```
 
-This verifies prerequisites, generates `tools/review_cycle.json`, adds artifact directories to `.gitignore`, and appends the agent documentation snippet to `AGENTS.md`.
+### 3. Add to `AGENTS.md`
+
+Append the documentation block from [`templates/AGENTS_SNIPPET.md`](templates/AGENTS_SNIPPET.md) to your repository's `AGENTS.md`.
 
 ---
 
 ## CLI Usage Quick Reference
 
 ```bash
-# Run a single review and remediation cycle (profile affinity)
+# Run a single review and remediation cycle
 tools/review_cycle
 
 # Run continuously until all 6 profiles pass clean without defects
@@ -167,16 +148,15 @@ tools/review_cycle --dry-run
 
 # Run audit standalone on a specific profile or file
 tools/audit -p security src/
-
-# Run targeted re-verification on a patch against a previous report
-git diff HEAD~1..HEAD | tools/audit -p security -V reviews/001_security.md
 ```
 
 ---
 
 ## Prerequisites & Ecosystem Dependencies
 
+The autonomous remediation phase (Phase 2) leverages Bubblewrap sandboxing and autonomous agent dispatch:
 - **`bws`**: [Bubblewrap Git Worktree Sandbox](https://github.com/sarielhp/bws) (`bws gw`) creates an ephemeral, air-gapped sandbox clone with host `$HOME` protection and 1-key merge triage.
 - **`agy-run-wild`**: Autonomous coding agent runner dispatched inside the `bws` sandbox.
 - **`git`**: Version control and worktree management.
 - **Ruby >= 3.0**: Runtime for orchestrator scripts.
+
