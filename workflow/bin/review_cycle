@@ -1631,6 +1631,7 @@ class MultiProfileReviewCycle
     {
       passed: passed && remaining.zero?,
       remaining: remaining,
+      findings: remaining,
       output: output,
       details: details,
       resolved: resolved_match,
@@ -1695,7 +1696,8 @@ class MultiProfileReviewCycle
       extra << "- **Footprint**: #{footprint[:stat]}\n"
     end
     if diff_audit && !content.include?('**Differential Audit**')
-      label = diff_audit[:findings].zero? ? 'Clean (0 defects in diff)' : "#{diff_audit[:findings]} warning(s)"
+      findings_count = diff_audit[:findings] || diff_audit[:remaining] || 0
+      label = findings_count.zero? ? 'Clean (0 defects in diff)' : "#{findings_count} warning(s)"
       extra << "- **Differential Audit**: #{label}\n"
     end
 
@@ -1898,7 +1900,8 @@ class MultiProfileReviewCycle
       audit_label = if partial
                       "#{remaining} defect(s) remaining"
                     else
-                      diff_audit[:findings]&.zero? ? 'Clean (0 defects in diff)' : "#{diff_audit[:findings]} warning(s)"
+                      findings_count = diff_audit[:findings] || diff_audit[:remaining] || 0
+                      findings_count.zero? ? 'Clean (0 defects in diff)' : "#{findings_count} warning(s)"
                     end
       lines << "- **Differential Audit**: #{audit_label}"
     end
