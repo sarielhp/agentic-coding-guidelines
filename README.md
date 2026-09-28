@@ -90,7 +90,7 @@ agentic-coding-guidelines/
 │       ├── check.rb          # Pre-commit CI quality gate
 │       ├── commit.rb         # Gated commit with .verified_head
 │       ├── bump.rb           # Semver bump & tag script
-│       └── .rubocop.yml      # Balanced RuboCop configuration
+│       └── dot_rubocop.yml   # Balanced RuboCop configuration template
 └── workflow/                 # Autonomous Review & Remediation Loop (review-cycle)
     ├── README.md             # Architecture, 5-phase loop & 4:2:1 cadence spec
     ├── bin/                  # Autonomous orchestration binaries

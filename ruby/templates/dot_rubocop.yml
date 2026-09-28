@@ -34,6 +34,12 @@ Metrics/AbcSize:
 Metrics/ClassLength:
   Max: 800
 
+Metrics/ModuleLength:
+  Max: 800
+
+Metrics/ParameterLists:
+  Max: 8
+
 # String allocation hygiene
 Style/FrozenStringLiteralComment:
   Enabled: true
@@ -43,6 +49,27 @@ Style/StringConcatenation:
   Enabled: false # Permit string concatenation where appropriate
 
 # Control flow & happy path line-of-sight
+Metrics/BlockNesting:
+  Max: 4 # Aligned with GUIDELINES.md Nesting Depth <= 4
+
+Style/Documentation:
+  Enabled: false # Permit lean classes, structs, and CLI scripts without docstring ceremony
+
+Style/GlobalVars:
+  AllowedVariables:
+    - $PROGRAM_NAME
+    - $0
+    - $stdin
+    - $stdout
+    - $stderr
+    - $?
+
+Layout/LineLength:
+  Max: 140
+  AllowedPatterns:
+    - '^\s*#'
+    - '^\s*opts\.on'
+
 Style/GuardClause:
   Enabled: true
 
@@ -52,12 +79,18 @@ Style/IfUnlessModifier:
 Style/EmptyElse:
   EnforcedStyle: empty
 
+Style/StderrPuts:
+  Enabled: false # Allow both warn and $stderr.puts in scripts
+
 # Safety & Exception Handling
 Lint/RescueException:
   Enabled: true
 
 Lint/SuppressedException:
   Enabled: true
+
+Lint/ScriptPermission:
+  Enabled: false # Permit drafting scripts prior to chmod +x or deployment to bin/
 
 # Process Execution Safety
 Security/Open:

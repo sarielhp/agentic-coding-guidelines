@@ -18,7 +18,7 @@ This directory defines the authoritative architecture, cognitive complexity boun
     ├── check.rb              # Pre-commit CI quality gate script
     ├── commit.rb             # Gated commit with .verified_head
     ├── bump.rb               # Semver bump & tag script
-    └── .rubocop.yml          # Balanced RuboCop configuration aligned with guidelines
+    └── dot_rubocop.yml       # Balanced RuboCop configuration template (instantiate as .rubocop.yml)
 ```
 
 ## Tooling Quick Reference

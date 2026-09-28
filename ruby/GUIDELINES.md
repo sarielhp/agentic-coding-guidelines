@@ -36,6 +36,7 @@ Rather than a blanket line limit, method thresholds are tiered by architectural 
 | **Test Cases** | `test_*` / `it` blocks declaring data fixtures, step executions, and assertions | 30–100 lines | 120 lines | **150 lines** |
 
 - **Declarative Complexity Ceiling**: Methods exceeding 80 lines up to the 120-line ceiling are permitted **if and only if** their Cognitive Complexity is $\le 5$.
+- **Standalone CLI & Procedural Scripts**: Single-purpose scripts and CLI tools do not require class or module wrappers. Flat procedural execution using top-level guard clauses (`abort "..."`, `exit 1`) is officially supported and idiomatic. Sizing rules govern methods; procedural top-level scripts are governed by the file limits and cognitive nesting depth ($\le 4$).
 
 ---
 
@@ -129,8 +130,8 @@ Compliance is automated via two complementary tooling tiers:
 - Checks Ruby syntax (`ruby -cw`), AST cognitive limits & sizing (`ruby-audit`), and unit tests (`rake test` or `minitest`).
 
 ### Deep Static Review (`ruby-static-analysis`)
-- Run periodically, before major releases, or in CI.
+- Run periodically, before major releases, or in CI. Can also be run on individual scripts.
 - Runs:
-  - `rubocop`: Style hygiene, layout, and idiomatic Ruby linting.
-  - `bundle-audit`: Security vulnerabilities in dependencies (Ruby Advisory Database).
-  - `dupl`: Structural AST clone and duplicate code detection.
+  - `rubocop`: Style hygiene, layout, and idiomatic Ruby linting. Automatically resolves local `.rubocop.yml` or falls back to the centralized standards baseline (`templates/dot_rubocop.yml`), preventing false-positive noise on draft scripts.
+  - `bundle-audit`: Security vulnerabilities in dependencies (Ruby Advisory Database; skipped automatically for single-file targets).
+  - `dupl`: Structural AST clone and duplicate code detection (skipped automatically for single-file targets).

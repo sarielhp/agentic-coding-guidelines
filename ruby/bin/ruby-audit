@@ -145,7 +145,8 @@ module RubyCodeAuditor
 
       # 2. Check for bare 'rescue Exception'
       if clean_line =~ /\brescue\s+(?:::)?Exception\b/ && !line.include?('ruby-audit: allow-rescue-exception')
-        trap_violations << TrapViolation.new(file, idx + 1, 'rescue_exception', "unsafe 'rescue Exception' traps system interrupts and signals; rescue StandardError instead")
+        # ruby-audit: allow-rescue-exception
+        trap_violations << TrapViolation.new(file, idx + 1, 'rescue_exception', "unsafe 'rescue Exception' traps system interrupts and signals; rescue StandardError instead") # ruby-audit: allow-rescue-exception
       end
 
       # 3. Check for Hash.new([]) or Hash.new({}) mutable default trap
