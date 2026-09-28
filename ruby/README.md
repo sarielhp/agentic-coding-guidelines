@@ -49,5 +49,5 @@ Add the following to your global agent instructions:
 ## Ruby Engineering Standards
 - **Guidelines**: For any Ruby script or project, strictly adhere to the architecture, cognitive complexity limits, and idiomatic conventions defined in `~/prog/standards/ruby/GUIDELINES.md`.
 - **Rationale**: Consult `~/prog/standards/ruby/RATIONALE.md` for cognitive load foundations, block scoping rules, and anti-decomposition constraints.
-- **Validation**: Enforce compliance before committing using `ruby-audit` (AST sizing & cognitive complexity) and `ruby-static-analysis` (syntax, style, and CVE review).
+- **Validation**: Enforce compliance before committing: run `ruby -cw` and `ruby-audit` for standalone scripts (<= 150 lines); run `ruby-static-analysis` only for projects or scripts > 150 lines (see `GUIDELINES.md` §7).
 ```

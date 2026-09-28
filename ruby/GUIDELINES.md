@@ -123,15 +123,21 @@ When refactoring methods that exceed complexity or line limits, AI coding agents
 
 ## 7. Quality Gates & Enforcement Tooling
 
-Compliance is automated via two complementary tooling tiers:
+Compliance is automated via two complementary tooling tiers tailored by target scope:
 
-### Fast Daily Gate (`ruby-audit` & `make check`)
-- Run on every commit or file save.
-- Checks Ruby syntax (`ruby -cw`), AST cognitive limits & sizing (`ruby-audit`), and unit tests (`rake test` or `minitest`).
+### Tiered Validation Gates
 
-### Deep Static Review (`ruby-static-analysis`)
-- Run periodically, before major releases, or in CI. Can also be run on individual scripts.
-- Runs:
-  - `rubocop`: Style hygiene, layout, and idiomatic Ruby linting. Automatically resolves local `.rubocop.yml` or falls back to the centralized standards baseline (`templates/dot_rubocop.yml`), preventing false-positive noise on draft scripts.
-  - `bundle-audit`: Security vulnerabilities in dependencies (Ruby Advisory Database; skipped automatically for single-file targets).
-  - `dupl`: Structural AST clone and duplicate code detection (skipped automatically for single-file targets).
+| Target Scope | Threshold / Trigger | Mandated Pre-Commit Gate | Rationale & Checks |
+|---|---|---|---|
+| **Standalone Scripts & CLI Utilities** | Single file, $\le 150$ lines, no `Gemfile.lock` | `ruby -cw <file>`<br>`ruby-audit <file>` | **Instant (15ms)** verification. Strictly verifies syntax, AST cognitive complexity ($\le 15$), nesting depth ($\le 4$), and fatal traps (`rescue Exception`, mutable hash defaults, core monkey patching). Bypasses repository-level CI and style nitpicks. |
+| **Large Scripts** | Single file, $> 150$ lines | `ruby-audit <file>`<br>`ruby-static-analysis <file>` | As scripts scale past 150 lines, `ruby-static-analysis` verifies structural hygiene and dead code using the standards baseline (`templates/dot_rubocop.yml`). Automatically skips `bundle-audit` and `dupl` for single files. |
+| **Projects & Repositories** | Multi-file codebases, packages with `Gemfile.lock` or local `.rubocop.yml` | `ruby-audit`<br>`ruby-static-analysis`<br>(or `make check`) | Complete multi-tool audit including syntax, style hygiene (`rubocop`), dependency CVEs (`bundle-audit`), code clone detection (`dupl`), and unit test suites (`rake test` / `minitest`). |
+
+### Tooling Details
+
+- **`ruby-audit`** (Fast AST Gate):
+  - Written with `RubyVM::AbstractSyntaxTree`; runs in ~10ms with zero gem dependencies.
+  - Enforces nesting depth ($\le 4$), cognitive complexity ($\le 15$), tiered method lines, and catches fatal runtime traps.
+- **`ruby-static-analysis`** (Multi-Linter Orchestrator):
+  - Automatically searches upward for a project `.rubocop.yml`; if absent, falls back to the balanced standards baseline ([`templates/dot_rubocop.yml`](templates/dot_rubocop.yml)).
+  - Intelligently scopes executions: skips repository-level checks (`bundle-audit`, `dupl`) when invoked on single files.
