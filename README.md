@@ -95,7 +95,7 @@ agentic-coding-guidelines/
 │       ├── install.rb        # Copy/symlink bin/* into ~/bin
 │       └── dot_rubocop.yml   # Balanced RuboCop configuration template
 └── workflow/                 # Review-cycle CONTRACT (the engine lives in ~/prog/26/ruby/review_cycle)
-    ├── README.md             # What a repository provides: tools/gate, tools/build, tools/audit, review_cycle.json
+    ├── README.md             # What a repository provides: tools/gate, tools/build, review_cycle.json
     └── templates/            # Project configuration templates
         ├── review_cycle.json # Standard repository contract template
         └── AGENTS_SNIPPET.md # Drop-in documentation block for AGENTS.md
@@ -135,9 +135,8 @@ review-cycle --setup
 
 This automatically:
 - Validates environment prerequisites (`--doctor`: Ruby $\ge 3.0$, Git, `bws`, `agy-run-wild`, `audit`).
-- Generates `tools/review_cycle.json` (`tools/gate`, `tools/build`, `tools/audit`, guidelines, and source targets).
+- Generates `tools/review_cycle.json` (`tools/gate`, `tools/build`, guidelines, and source targets). The auditor is `review-audit` on PATH; nothing is linked into the project.
 - Checks the `tools/build` contract and, for Ruby projects, creates `.ruby-version` if missing.
-- Provisions a local `tools/audit` symlink pointing to the canonical multi-lens auditor.
 - Enforces Git hygiene by appending `reviews/archive/` and `reviews/logs/` to `.gitignore`.
 - Appends the standard review cycle specification block to `AGENTS.md`.
 

@@ -38,7 +38,7 @@ chmod +x tools/*
 ln -sf gate tools/check                               # compatibility alias
 cp ~/prog/standards/ruby/templates/dot_rubocop.yml .rubocop.yml
 ruby -e 'puts RUBY_VERSION' > .ruby-version
-review-cycle --setup                                   # review contract, tools/audit, .gitignore, AGENTS.md
+review-cycle --setup                                   # review contract, .gitignore, AGENTS.md
 ```
 
 | Command | Role |

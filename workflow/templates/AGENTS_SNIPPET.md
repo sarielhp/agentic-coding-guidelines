@@ -4,10 +4,10 @@ Single-command orchestration executing adversarial review, sandbox remediation, 
 Complete portable specification: [`tools/REVIEW_CYCLE.md`](tools/REVIEW_CYCLE.md)
 
 ### Pipeline Execution Phases:
-1. **Audit**: Runs multi-lens audit (`tools/audit`), producing `<reports-dir>/<NUM>_<profile>.md`.
+1. **Audit**: Runs multi-lens audit (`review-audit`), producing `<reports-dir>/<NUM>_<profile>.md`.
 2. **Remediation**: Dispatches sandbox agent ([`bws gw`](https://github.com/sarielhp/bws) + `agy-run-wild`) to create `<reports-dir>/<NUM>_<profile>_plan.md`, apply fixes, author regression tests, and squash-merge.
 3. **Quality Gate & Rollback**: Runs quality gate (auto-detected or `--gate-cmd`). If sandbox or gate fails, automatically rolls back workspace to pre-cycle commit.
-4. **Verification & Summary**: Inspects diff footprint (`--max-diff-lines`), runs differential re-audit on patch (`tools/audit`), and generates `<reports-dir>/<NUM>_summary.md`.
+4. **Verification & Summary**: Inspects diff footprint (`--max-diff-lines`), runs differential re-audit on patch (`review-audit`), and generates `<reports-dir>/<NUM>_summary.md`.
 5. **Archive & Push**: Moves artifacts to `<reports-dir>/archive/`, records `<reports-dir>/state.json`, and pushes to remote (`--no-push` to bypass).
 
 ### 4:2:1 Pyramid Cadence & 6-Lens Balancing:

@@ -11,7 +11,6 @@ AllCops:
     - 'junk/**/*'
     - '.bundle/**/*'
     - 'tmp/**/*'
-    - 'tools/audit'      # review-cycle symlink to the shared auditor
     - 'reviews/**/*'     # review-cycle artifacts
 
 # Metric thresholds: Defer to `ruby-audit` for cognitive complexity & tiered sizing
