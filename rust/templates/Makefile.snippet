@@ -1,17 +1,23 @@
 # Standard Rust Quality Targets (include or adapt in project Makefile)
 
-.PHONY: all build check ci lint audit review static-analysis test commit bump install clean
+.PHONY: all build gate check ci lint audit review static-analysis test commit bump install clean
 
 all: build
 
+# Build via tools/build (cargo build --release)
 build:
-	cargo build --release
+	tools/build
 
 # Fast everyday gate: format, clippy, rust-audit, cargo test, cargo check
-check:
-	tools/check
+gate:
+	tools/gate
 
-ci: check
+# Compatibility alias (tools/check is a symlink to tools/gate)
+check: gate
+
+ci: gate
+
+
 
 # Sizing, cognitive complexity, and unwrap/safety audit
 audit:

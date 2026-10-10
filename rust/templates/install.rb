@@ -10,13 +10,9 @@ require 'open3'
 root_dir = File.expand_path('..', __dir__)
 cargo_toml = File.join(root_dir, 'Cargo.toml')
 
-unless File.exist?(cargo_toml)
-  abort "Error: Cargo.toml not found in repository root (#{root_dir})."
-end
+abort "Error: Cargo.toml not found in repository root (#{root_dir})." unless File.exist?(cargo_toml)
 
-unless system('command -v cargo >/dev/null 2>&1')
-  abort 'Error: cargo binary not found in PATH.'
-end
+abort 'Error: cargo binary not found in PATH.' unless system('command -v cargo >/dev/null 2>&1')
 
 pkg_name = File.read(cargo_toml)[/^name\s*=\s*["']([^"']+)["']/, 1] || File.basename(root_dir)
 
@@ -33,14 +29,14 @@ end
 
 puts "\n\e[32m==> Installation complete!\e[0m"
 bin_path = `which #{pkg_name} 2>/dev/null`.strip
-if !bin_path.empty?
-  puts "#{pkg_name} is available in PATH at: #{bin_path}"
-  version_out = `#{pkg_name} --version 2>/dev/null`.strip
-  puts "Version: #{version_out}" unless version_out.empty?
-else
+if bin_path.empty?
   warn "\nNote: '#{pkg_name}' is not currently in your PATH."
   warn 'Ensure ~/bin is added to your PATH:'
   warn '  export PATH="$HOME/bin:$PATH"'
+else
+  puts "#{pkg_name} is available in PATH at: #{bin_path}"
+  version_out = `#{pkg_name} --version 2>/dev/null`.strip
+  puts "Version: #{version_out}" unless version_out.empty?
 end
 
 exit 0

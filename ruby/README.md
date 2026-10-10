@@ -13,13 +13,41 @@ This directory defines the authoritative architecture, cognitive complexity boun
 │   ├── ruby-audit            # Sizing & cognitive complexity AST auditor
 │   ├── ruby-static-analysis  # Multi-linter orchestrator (rubocop, bundle-audit, dupl)
 │   └── ruby-install-tools    # Installs development gems and CLI tools
-└── templates/                # Reusable project workflow templates
+└── templates/                # Reusable project workflow templates (install under tools/ without .rb)
     ├── Makefile.snippet      # Standard Makefile quality targets
-    ├── check.rb              # Pre-commit CI quality gate script
-    ├── commit.rb             # Gated commit with .verified_head
-    ├── bump.rb               # Semver bump & tag script
-    └── dot_rubocop.yml       # Balanced RuboCop configuration template (instantiate as .rubocop.yml)
+    ├── build.rb              # tools/build: ruby -cw over bin/, lib/, tools/ (no tests, no linters)
+    ├── gate.rb               # tools/gate: build, ruby-audit, RuboCop, tests (tools/check = symlink)
+    ├── commit.rb             # tools/commit: gated commit, records .verified_head, pushes
+    ├── bump.rb               # tools/bump: semver bump, gate (or trusted .verified_head), tag, push, install
+    ├── install.rb            # tools/install: copy or --link bin/* into ~/bin (runs tools/build first)
+    └── dot_rubocop.yml       # Balanced RuboCop baseline (instantiate as .rubocop.yml; version from .ruby-version)
 ```
+
+## Project Layout Convention
+
+- `bin/<name>` — executables. A single-file CLI keeps its `VERSION = 'x.y.z'` constant here and exposes `--version`; `tools/bump` finds it there when there is no `lib/**/version.rb`.
+- `lib/` — library code, `test/*_test.rb` or `test/test_*.rb` — minitest suites run by `tools/gate` with `-Ilib:test`.
+- `tools/` — the lifecycle scripts below; `.ruby-version` pins the interpreter for RuboCop and mise/rbenv.
+
+## Project Bootstrap
+
+```bash
+mkdir -p tools
+for t in build gate commit bump install; do cp ~/prog/standards/ruby/templates/$t.rb tools/$t; done
+chmod +x tools/*
+ln -sf gate tools/check                               # compatibility alias
+cp ~/prog/standards/ruby/templates/dot_rubocop.yml .rubocop.yml
+ruby -e 'puts RUBY_VERSION' > .ruby-version
+review-cycle --setup                                   # review contract, tools/audit, .gitignore, AGENTS.md
+```
+
+| Command | Role |
+|---|---|
+| `tools/build` | Syntax-validate every Ruby source. Repo-local, side-effect free. |
+| `tools/gate` | Tier 1 gate: build, `ruby-audit`, RuboCop, tests. |
+| `tools/commit -m "..."` | Gate, stage, commit, record `.verified_head`, push. |
+| `tools/bump [--minor\|--major]` | Bump VERSION, gate (skipped when `.verified_head` == HEAD and only the version changed), tag, push, install. |
+| `tools/install [--link]` | Build, then copy or symlink `bin/*` into `~/bin`. |
 
 ## Tooling Quick Reference
 

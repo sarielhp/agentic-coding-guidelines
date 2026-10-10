@@ -3,7 +3,7 @@
 
 require 'open3'
 
-ENV['PATH'] = "#{File.expand_path('~/.cargo/bin')}:#{ENV['PATH']}"
+ENV['PATH'] = "#{File.expand_path('~/.cargo/bin')}:#{ENV.fetch('PATH', nil)}"
 root_dir = File.expand_path('..', __dir__)
 Dir.chdir(root_dir)
 
@@ -45,7 +45,7 @@ audit_cmd = if !audit_bin.empty?
             end
 
 if audit_cmd
-  stdout, _ = run_cmd('Complexity audit', audit_cmd)
+  stdout, = run_cmd('Complexity audit', audit_cmd)
   puts stdout.strip unless stdout.strip.empty?
 else
   puts "  \e[33m[SKIP]\e[0m rust-audit not found in PATH or tools/"

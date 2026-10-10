@@ -1,14 +1,22 @@
 # Standard Ruby Quality Targets (include or adapt in project Makefile)
+# Lifecycle scripts live in tools/ (copied from ~/prog/standards/ruby/templates/).
 
-.PHONY: all check ci lint audit review static-analysis test commit bump clean
+.PHONY: all build gate check ci lint audit review static-analysis test commit bump install clean
 
-all: check
+all: gate
 
-# Fast everyday gate: syntax, ruby-audit metrics, rubocop, test
-check:
-	tools/check
+# Build / syntax validation only (no tests, no linters, writes nothing outside the repo)
+build:
+	tools/build
 
-ci: check
+# Fast everyday gate: build, ruby-audit metrics, rubocop, tests
+gate:
+	tools/gate
+
+# Compatibility alias (tools/check is a symlink to tools/gate)
+check: gate
+
+ci: gate
 
 # Sizing & cognitive complexity audit
 audit:
@@ -16,7 +24,7 @@ audit:
 
 # Fast static linting
 lint:
-	ruby -cw lib/**/*.rb bin/*
+	tools/build
 	rubocop --parallel
 	ruby-audit --quiet
 
@@ -27,15 +35,19 @@ static-analysis:
 
 # Offline unit tests
 test:
-	bundle exec rake test || ruby -Ilib:test test/test_*.rb
+	bundle exec rake test || ruby -Ilib:test test/*_test.rb
 
-# Gated commit (runs check first, stages, commits, pushes)
+# Gated commit (runs gate first, stages, commits, records .verified_head, pushes)
 commit:
 	tools/commit "$(msg)"
 
-# Increment patch version, verify, commit, push, and install
+# Bump version, verify (or trust .verified_head), commit, tag, push, install
 bump:
 	tools/bump
+
+# Install bin/* into ~/bin (tools/install --link for symlinks)
+install:
+	tools/install
 
 clean:
 	rm -rf .bundle/ tmp/ coverage/

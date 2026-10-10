@@ -1,17 +1,23 @@
 # Standard Go Quality Targets (include or adapt in project Makefile)
 
-.PHONY: all build check ci lint audit review static-analysis test commit bump clean
+.PHONY: all build gate check ci lint audit review static-analysis test commit bump clean
 
 all: build
 
+# Build via tools/build (go build ./... and bin/<project>)
 build:
-	go build -o $(BIN_NAME) .
+	tools/build
 
 # Fast everyday gate: format, vet, baseline staticcheck, audit, test, build
-check:
-	tools/check
+gate:
+	tools/gate
 
-ci: check
+# Compatibility alias (tools/check is a symlink to tools/gate)
+check: gate
+
+ci: gate
+
+
 
 # Sizing & cognitive complexity audit
 audit:

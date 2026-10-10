@@ -4,7 +4,8 @@
 require 'optparse'
 require 'open3'
 
-# Automates quality gate check, staging, committing, and pushing for Ruby projects.
+# Gated commit for Ruby projects: runs tools/gate, stages, commits, records
+# .verified_head (consumed by tools/bump), and pushes.
 # Usage: ./tools/commit [options] "commit message"
 
 options = { push: true, gate: true }
@@ -40,17 +41,15 @@ end
 if options[:gate]
   puts "\e[1;36m==> Running Quality Gate before committing...\e[0m"
   gate_script = [File.join(root_dir, 'tools', 'gate'), File.join(root_dir, 'tools', 'check')].find { |s| File.exist?(s) }
-  if gate_script
-    unless system(gate_script)
-      warn "\e[31m❌ Quality gate failed. Commit aborted.\e[0m"
-      exit 1
-    end
+  if gate_script && !system(gate_script)
+    warn "\e[31m❌ Quality gate failed. Commit aborted.\e[0m"
+    exit 1
   end
 end
 
 # 2. Stage Changes
 puts "\e[1;36m==> Staging changes...\e[0m"
-_, _, s = Open3.capture3('git add -A')
+_, _, s = Open3.capture3('git', 'add', '-A')
 unless s.success?
   warn "\e[31m❌ Failed to stage changes.\e[0m"
   exit 1
@@ -66,15 +65,17 @@ else
   exit 1
 end
 
-# 4. Push
+# 4. Record the gate-verified HEAD so tools/bump can skip the gate for a pure version bump
+File.write(File.join(root_dir, '.verified_head'), `git rev-parse HEAD`.strip) if options[:gate]
+
+# 5. Push
 if options[:push]
   puts "\e[1;36m==> Pushing to remote...\e[0m"
   curr_branch = `git rev-parse --abbrev-ref HEAD`.strip
-  remote_configured = !`git remote`.strip.empty?
-  if remote_configured
-    system('git', 'push', '--set-upstream', 'origin', curr_branch)
-  else
+  if `git remote`.strip.empty?
     puts "  \e[33mℹ No git remote configured, skipping push.\e[0m"
+  else
+    system('git', 'push', '--set-upstream', 'origin', curr_branch)
   end
 end
 

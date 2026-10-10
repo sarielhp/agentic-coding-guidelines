@@ -3,7 +3,7 @@
 
 require 'open3'
 
-ENV['PATH'] = "#{File.expand_path('~/.go/bin')}:#{File.expand_path('~/go/bin')}:#{ENV['PATH']}"
+ENV['PATH'] = "#{File.expand_path('~/.go/bin')}:#{File.expand_path('~/go/bin')}:#{ENV.fetch('PATH', nil)}"
 root_dir = File.expand_path('..', __dir__)
 Dir.chdir(root_dir)
 
@@ -25,11 +25,11 @@ end
 puts "\e[1m=== Quality Gate (#{proj_name}) ===\e[0m"
 
 # 1. Format
-unformatted_out, _ = Open3.capture3("gofmt -s -l .")
+unformatted_out, = Open3.capture3('gofmt -s -l .')
 unformatted = unformatted_out.lines.map(&:strip).reject(&:empty?)
 if unformatted.any?
-  _, err, status = Open3.capture3("gofmt -s -w .")
-  if !status.success? && err.include?("read-only file system")
+  _, err, status = Open3.capture3('gofmt -s -w .')
+  if !status.success? && err.include?('read-only file system')
     puts "\e[31m✗ Formatting check failed! Files need gofmt:\e[0m\n#{unformatted.join("\n")}"
     exit 1
   elsif !status.success?
@@ -39,15 +39,15 @@ if unformatted.any?
 end
 
 # 2. Mod tidy
-run_cmd("Go mod tidy", "go mod tidy -diff") if File.exist?('go.mod')
+run_cmd('Go mod tidy', 'go mod tidy -diff') if File.exist?('go.mod')
 
 # 3. Vet
-run_cmd("Go vet", "go vet ./...")
+run_cmd('Go vet', 'go vet ./...')
 
 # 4. Staticcheck (baseline aware if baseline file exists)
 staticcheck_bin = `which staticcheck 2>/dev/null`.strip
-if !staticcheck_bin.empty?
-  out, _, _ = Open3.capture3("staticcheck ./...")
+unless staticcheck_bin.empty?
+  out, = Open3.capture3('staticcheck ./...')
   baseline_file = File.join(root_dir, 'tools', 'staticcheck-baseline.txt')
   if File.exist?(baseline_file)
     baseline_lines = File.read(baseline_file).lines.map(&:strip)
@@ -70,22 +70,21 @@ end
 # 5. Cognitive complexity and line audit
 audit_bin = `which go-audit 2>/dev/null`.strip
 audit_cmd = if !audit_bin.empty?
-              "go-audit --quiet"
+              'go-audit --quiet'
             elsif File.exist?(File.join(root_dir, 'tools', 'audit_lines'))
               "#{File.join(root_dir, 'tools', 'audit_lines')} --quiet"
             end
 
 if audit_cmd
-  stdout, _ = run_cmd("Line & complexity audit", audit_cmd)
+  stdout, = run_cmd('Line & complexity audit', audit_cmd)
   puts stdout.strip unless stdout.strip.empty?
 end
 
 # 6. Go test
-run_cmd("Go test", "go test -v ./...")
+run_cmd('Go test', 'go test -v ./...')
 
 # 7. Build
-bin_name = proj_name
-out, err, s = Open3.capture3("go build -o /dev/null .")
+_, err, s = Open3.capture3('go build -o /dev/null .')
 unless s.success?
   puts "\e[31m✗ Build failed!\e[0m"
   puts err

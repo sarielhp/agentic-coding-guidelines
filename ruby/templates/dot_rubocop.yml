@@ -2,7 +2,8 @@
 # Cognitive metrics (complexity, method length, depth) are enforced via `ruby-audit`.
 
 AllCops:
-  TargetRubyVersion: 3.0
+  # TargetRubyVersion is intentionally not set: RuboCop reads it from the project
+  # .ruby-version file (also honoured by mise/rbenv). Create that file during onboarding.
   NewCops: enable
   SuggestExtensions: false
   Exclude:
@@ -10,6 +11,8 @@ AllCops:
     - 'junk/**/*'
     - '.bundle/**/*'
     - 'tmp/**/*'
+    - 'tools/audit'      # review-cycle symlink to the shared auditor
+    - 'reviews/**/*'     # review-cycle artifacts
 
 # Metric thresholds: Defer to `ruby-audit` for cognitive complexity & tiered sizing
 Metrics/MethodLength:

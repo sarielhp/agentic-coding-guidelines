@@ -60,7 +60,8 @@ agentic-coding-guidelines/
 │   │   └── go-install-tools  # Automated linter installer into ~/.go/bin/
 │   └── templates/            # Reusable project workflow templates
 │       ├── Makefile.snippet  # Standard Makefile targets
-│       ├── check.rb          # Pre-commit CI quality gate
+│       ├── build.rb          # tools/build: artifact only, repo-local, no tests/linters
+│       ├── gate.rb           # tools/gate: Tier 1 quality gate (tools/check = symlink)
 │       ├── commit.rb         # Gated commit with .verified_head
 │       └── bump.rb           # Version bump & install script
 ├── rust/
@@ -73,7 +74,8 @@ agentic-coding-guidelines/
 │   │   └── rust-install-tools# Automated cargo tools installer into ~/.cargo/bin/
 │   └── templates/            # Reusable project workflow templates
 │       ├── Makefile.snippet  # Standard Makefile targets
-│       ├── check.rb          # Pre-commit CI quality gate (Tier 1)
+│       ├── build.rb          # tools/build: artifact only, repo-local, no tests/linters
+│       ├── gate.rb           # tools/gate: Tier 1 quality gate (tools/check = symlink)
 │       ├── commit.rb         # Gated commit with .verified_head
 │       ├── bump.rb           # 3-Tier milestone version bump & install script
 │       └── install.rb        # Direct cargo install --root ~ script
@@ -87,9 +89,11 @@ agentic-coding-guidelines/
 │   │   └── ruby-install-tools# Automated gem and tooling auditor/installer
 │   └── templates/            # Reusable project workflow templates
 │       ├── Makefile.snippet  # Standard Makefile targets
-│       ├── check.rb          # Pre-commit CI quality gate
+│       ├── build.rb          # tools/build: artifact only, repo-local, no tests/linters
+│       ├── gate.rb           # tools/gate: Tier 1 quality gate (tools/check = symlink)
 │       ├── commit.rb         # Gated commit with .verified_head
-│       ├── bump.rb           # Semver bump & tag script
+│       ├── bump.rb           # Semver bump & tag script (trusts .verified_head)
+│       ├── install.rb        # Copy/symlink bin/* into ~/bin
 │       └── dot_rubocop.yml   # Balanced RuboCop configuration template
 └── workflow/                 # Autonomous Review & Remediation Loop (review-cycle)
     ├── README.md             # Architecture, 5-phase loop & 4:2:1 cadence spec
@@ -112,14 +116,18 @@ Copy the standard quality gates, bumper, and guarded commit harness into your pr
 
 ```bash
 mkdir -p tools
+LANG=ruby   # or go / rust
 
-# For Rust Projects:
-cp ~/prog/standards/rust/templates/{check.rb,commit.rb,bump.rb,install.rb} tools/
+# Lifecycle scripts, installed under their canonical names (no .rb extension):
+for t in build gate commit bump install; do
+  [ -f ~/prog/standards/$LANG/templates/$t.rb ] && cp ~/prog/standards/$LANG/templates/$t.rb tools/$t
+done
 chmod +x tools/*
+ln -sf gate tools/check          # compatibility alias: tools/check == tools/gate
 
-# For Go Projects:
-cp ~/prog/standards/go/templates/{check.rb,commit.rb,bump.rb} tools/
-chmod +x tools/*
+# Ruby only: lint baseline and the version pin read by RuboCop and mise/rbenv
+cp ~/prog/standards/ruby/templates/dot_rubocop.yml .rubocop.yml
+ruby -e 'puts RUBY_VERSION' > .ruby-version
 ```
 
 ### Step 2: Bootstrap the Review & Quality Contract
@@ -131,7 +139,8 @@ review-cycle --setup
 
 This automatically:
 - Validates environment prerequisites (`--doctor`: Ruby $\ge 3.0$, Git, `bws`, `agy-run-wild`, `audit`).
-- Generates `tools/review_cycle.json` (auto-detecting `tools/gate`, build commands, guidelines, and source targets).
+- Generates `tools/review_cycle.json` (`tools/gate`, `tools/build`, `tools/audit`, guidelines, and source targets).
+- Checks the `tools/build` contract and, for Ruby projects, creates `.ruby-version` if missing.
 - Provisions a local `tools/audit` symlink pointing to the canonical multi-lens auditor.
 - Enforces Git hygiene by appending `reviews/archive/` and `reviews/logs/` to `.gitignore`.
 - Appends the standard review cycle specification block to `AGENTS.md`.
@@ -141,10 +150,23 @@ Once onboarded, maintainers and AI agents operate through 4 canonical commands:
 
 | Command | Lifecycle Role | Frequency | Description |
 | :--- | :--- | :--- | :--- |
+| **`tools/build`** | Build Contract | Called by gate, install, review-cycle | Produces or validates the artifact inside the repo. Never writes outside it, never runs tests or linters. May be trivial (a syntax check for Ruby). |
 | **`tools/gate`** | Fast Quality Gate | Every edit / pre-commit | Sub-second Tier 1 gate: unit tests, formatting, linter, cognitive complexity limits. |
-| **`tools/commit -m "..."`** | Guarded Git Commit | Multiple times daily | Runs `tools/gate`, verifies `.verified_head`, stages changes, commits, and pushes to remote. |
-| **`tools/bump`** | Milestone Release | Version milestones | 3-tier milestone guard (auto-triggers Tier 2 benchmarks and Tier 3 compiler tests), bumps versions, updates changelog, and pushes git tags. |
+| **`tools/commit -m "..."`** | Guarded Git Commit | Multiple times daily | Runs `tools/gate`, stages changes, commits, records `.verified_head`, and pushes to remote. |
+| **`tools/bump`** | Milestone Release | Version milestones | Bumps the version, runs `tools/gate` unless `.verified_head` matches HEAD and only the version changed, tags, pushes, and runs `tools/install`. (Rust adds Tier 2/3 milestone checks.) |
+| **`tools/install`** | Install | After a release | Runs `tools/build`, then copies or symlinks the artifact into `~/bin`. The only script allowed to write outside the repository. |
 | **`review-cycle`** | Autonomous Remediation | Periodic / on-demand | 5-phase closed-loop engine: 6-lens audit $\to$ `bws` sandbox fix $\to$ gate verification $\to$ auto-commit. |
+
+#### The `tools/build` contract
+
+Every repository carries a `tools/build`, even when it is almost empty, so no tool ever has to guess a build command:
+
+- It produces or validates the artifact **inside the repository** and exits non-zero on failure (`cargo build --release`, `go build ./...`, `ruby -cw` over the sources).
+- It **never writes outside the repository**. Installing is `tools/install`'s job, and `tools/install` calls `tools/build` first.
+- It runs **no tests and no linters**. Build answers "does the artifact exist and parse"; `tools/gate` answers "is it good". A build that grows into a second gate makes the review cycle pay twice.
+- `tools/gate` calls it as its first step, so syntax validation is defined exactly once.
+
+`review-cycle --setup` warns when `tools/build` is missing and never falls back to `tools/install`.
 
 ---
 

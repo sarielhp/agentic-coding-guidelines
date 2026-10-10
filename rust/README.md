@@ -14,7 +14,8 @@ This directory defines the authoritative architecture, cognitive complexity boun
 │   ├── rust-static-analysis  # Multi-linter static analysis orchestrator (clippy, audit, deny, machete, geiger)
 │   └── rust-install-tools    # Installs cargo audit tools into ~/.cargo/bin/
 └── templates/                # Reusable project workflow templates
-    ├── check.rb              # Pre-commit CI quality gate script (Tier 1)
+    ├── build.rb              # tools/build: cargo build --release, no tests/linters
+    ├── gate.rb               # tools/gate: Tier 1 quality gate (tools/check = symlink)
     ├── commit.rb             # Gated commit with .verified_head
     ├── bump.rb               # 3-Tier milestone version bump & install script
     ├── install.rb            # Direct cargo install --root ~ script

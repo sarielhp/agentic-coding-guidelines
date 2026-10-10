@@ -15,7 +15,8 @@ This directory defines the authoritative architecture, cognitive complexity boun
 │   └── go-install-tools    # Installs linters into ~/.go/bin/
 └── templates/              # Reusable project workflow templates
     ├── Makefile.snippet    # Standard Makefile quality targets
-    ├── check.rb            # Pre-commit CI quality gate script
+    ├── build.rb            # tools/build: go build ./... (+ bin/<project>), no tests/linters
+    ├── gate.rb             # tools/gate: Tier 1 quality gate (tools/check = symlink)
     ├── commit.rb           # Gated commit with .verified_head
     └── bump.rb             # Semantic patch bump & install script
 ```

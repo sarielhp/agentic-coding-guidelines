@@ -12,6 +12,7 @@
 # ==============================================================================
 
 require 'open3'
+require 'tempfile'
 require 'optparse'
 
 VERSION = '0.2.0'
@@ -77,6 +78,33 @@ def search_dir_upward_for_config(start_dir)
   nil
 end
 
+# The baseline deliberately leaves TargetRubyVersion unset so projects pin it in
+# .ruby-version. When the target has no such pin, RuboCop would analyze as the oldest
+# supported Ruby and reject modern syntax, so fall back to the running interpreter.
+def ruby_version_pinned?(paths)
+  dirs = paths.map { |p| File.expand_path(File.directory?(p) ? p : File.dirname(p)) }
+  dir = dirs.min_by(&:length) || Dir.pwd
+  while dir && dir != '/'
+    return true if %w[.ruby-version .tool-versions].any? { |n| File.file?(File.join(dir, n)) }
+    break if File.exist?(File.join(dir, '.git'))
+
+    dir = File.dirname(dir)
+  end
+  false
+end
+
+def baseline_config_for(paths, quiet)
+  return STANDARDS_RUBOCOP if ruby_version_pinned?(paths)
+
+  target = RUBY_VERSION.split('.').first(2).join('.')
+  puts "  \e[33mℹ No .ruby-version found; analyzing as Ruby #{target}. Pin it with: echo #{RUBY_VERSION} > .ruby-version\e[0m" unless quiet
+  tmp = Tempfile.new(['rubocop-baseline', '.yml'])
+  tmp.write("inherit_from: #{STANDARDS_RUBOCOP}\nAllCops:\n  TargetRubyVersion: #{target}\n")
+  tmp.close
+  at_exit { tmp.unlink } # the closure keeps the file alive until exit
+  tmp.path
+end
+
 def find_rubocop_config(paths)
   config = search_dir_upward_for_config(Dir.pwd)
   return config if config
@@ -132,7 +160,7 @@ if run_all || options[:rubocop]
       rubocop_cmd = "rubocop #{target_paths.join(' ')}"
     elsif File.file?(STANDARDS_RUBOCOP)
       puts "  \e[36mℹ No local .rubocop.yml found; using standards baseline\e[0m" unless options[:quiet]
-      rubocop_cmd = "rubocop --config #{STANDARDS_RUBOCOP} #{target_paths.join(' ')}"
+      rubocop_cmd = "rubocop --config #{baseline_config_for(target_paths, options[:quiet])} #{target_paths.join(' ')}"
     else
       rubocop_cmd = "rubocop --lint #{target_paths.join(' ')}"
     end

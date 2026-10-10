@@ -30,9 +30,9 @@ Every review cycle executes an autonomous, transactionally guarded workflow:
                                       ▼
                   ┌─────────────────────────────────────────┐
                   │ Phase 3: Quality Gate Verification      │
-                  │   (tools/gate, GATE_CMD, or check)      │
+                  │   (tools/gate, GATE_CMD, or tools/check) │
                   │   - Automatic rollback if gate fails    │
-                  │   - Optional: rebuild/reinstall binary  │
+                  │   - Rebuild via tools/build (BUILD_CMD)  │
                   └───────────────────┬─────────────────────┘
                                       │
                                       ▼
@@ -118,7 +118,7 @@ Create `tools/review_cycle.json` (or in repository root):
 {
   "target": "src",
   "gate_cmd": "tools/gate",
-  "build_cmd": "tools/install",
+  "build_cmd": "tools/build",
   "audit_cmd": "tools/audit",
   "guidelines": "Adhere strictly to architectural and cognitive complexity standards (depth <= 4, branches <= 15, tiered function limits).",
   "max_diff_lines": 800

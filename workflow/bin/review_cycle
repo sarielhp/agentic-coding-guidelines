@@ -654,15 +654,14 @@ class MultiProfileReviewCycle
     return options[:build_cmd] if options[:build_cmd] && !options[:build_cmd].strip.empty?
     return ENV['BUILD_CMD'] if ENV['BUILD_CMD'] && !ENV['BUILD_CMD'].strip.empty?
 
-    build_candidates = [
-      File.join(REPO_ROOT, 'tools', 'build_local'),
-      File.join(REPO_ROOT, 'tools', 'build_local.rb'),
-      File.join(REPO_ROOT, 'tools', 'install'),
-      File.join(REPO_ROOT, 'tools', 'install.rb'),
-      File.expand_path('build_local', __dir__),
-      File.expand_path('build_local.rb', __dir__),
-      File.expand_path('install', __dir__)
-    ]
+# tools/build is the contract (repo-local, side-effect free). tools/install is deliberately
+# NOT a candidate: it writes outside the repository (e.g. ~/bin) on every review cycle.
+build_candidates = [
+  File.join(REPO_ROOT, 'tools', 'build'),
+  File.join(REPO_ROOT, 'tools', 'build.rb'),
+  File.join(REPO_ROOT, 'tools', 'build_local'),
+  File.join(REPO_ROOT, 'tools', 'build_local.rb')
+]
     candidate = build_candidates.find { |p| safe_install_script?(p) || (File.file?(p) && File.executable?(p)) }
     return candidate.end_with?('.rb') && !File.executable?(candidate) ? "ruby #{candidate}" : candidate if candidate
 
@@ -1871,6 +1870,36 @@ class MultiProfileReviewCycle
     end
   end
 
+# The lifecycle contract requires tools/build (see ~/prog/standards/README.md). It may be
+# trivial (a syntax check for interpreted languages) but it must exist, so the review cycle
+# never has to guess a build command.
+def self.setup_check_build_contract
+  build = File.join(REPO_ROOT, 'tools', 'build')
+  if File.executable?(build)
+    puts "  ✔ tools/build present".green
+    return
+  end
+
+  lang = new({}).detect_project_language
+  template = File.expand_path("../../#{lang}/templates/build.rb", __dir__)
+  puts "  ⚠ tools/build is missing; the review cycle will not rebuild after remediation.".yellow
+  puts "    Copy the template: cp #{template} tools/build && chmod +x tools/build" if File.exist?(template)
+end
+
+# RuboCop and mise/rbenv read .ruby-version; without it RuboCop analyzes as the oldest
+# supported Ruby and rejects modern syntax.
+def self.setup_pin_ruby_version
+  return unless new({}).detect_project_language == :ruby
+
+  file = File.join(REPO_ROOT, '.ruby-version')
+  if File.exist?(file)
+    puts "  ✔ .ruby-version present (#{File.read(file).strip})".green
+  else
+    File.write(file, "#{RUBY_VERSION}\n")
+    puts "  ✔ Created .ruby-version (#{RUBY_VERSION})".green
+  end
+end
+
   def self.setup_update_gitignore(rep_dir = 'reviews')
     gitignore_file = File.join(REPO_ROOT, '.gitignore')
     entries = ["#{rep_dir}/archive/", "#{rep_dir}/logs/"]
@@ -1927,6 +1956,8 @@ class MultiProfileReviewCycle
 
     puts "2. Initializing Repository Configuration:"
     setup_provision_audit
+    setup_check_build_contract
+    setup_pin_ruby_version
     cfg_path = setup_generate_config
     setup_update_gitignore
     setup_update_agents_doc

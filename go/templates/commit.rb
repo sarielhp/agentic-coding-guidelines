@@ -13,8 +13,8 @@ root_dir = File.expand_path('..', __dir__)
 Dir.chdir(root_dir)
 
 # 1. Quality gate
-gate_script = File.join(root_dir, 'tools', 'check')
-if File.exist?(gate_script)
+gate_script = [File.join(root_dir, 'tools', 'gate'), File.join(root_dir, 'tools', 'check')].find { |s| File.exist?(s) }
+if gate_script
   gate_out, gate_err, status = Open3.capture3(gate_script)
   unless status.success?
     puts gate_out unless gate_out.empty?
@@ -24,9 +24,9 @@ if File.exist?(gate_script)
 end
 
 # 2. Stage changes
-_, _, s = Open3.capture3("git add -A")
+_, _, s = Open3.capture3('git add -A')
 unless s.success?
-  warn "git add failed"
+  warn 'git add failed'
   exit 1
 end
 

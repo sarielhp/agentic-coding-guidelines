@@ -40,11 +40,9 @@ end
 if options[:gate]
   puts "\e[1;36m==> Running Quality Gate before committing...\e[0m"
   gate_script = [File.join(root_dir, 'tools', 'gate'), File.join(root_dir, 'tools', 'check')].find { |s| File.exist?(s) }
-  if gate_script
-    unless system(gate_script)
-      warn "\e[31m❌ Quality gate failed. Commit aborted.\e[0m"
-      exit 1
-    end
+  if gate_script && !system(gate_script)
+    warn "\e[31m❌ Quality gate failed. Commit aborted.\e[0m"
+    exit 1
   end
 end
 
