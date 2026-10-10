@@ -49,7 +49,6 @@ Raw line counts are a crude proxy for code clarity. **Cognitive complexity** (ne
 agentic-coding-guidelines/
 ├── README.md                 # Overview & quickstart
 ├── LICENSE                   # MIT License
-├── review-cycle -> workflow  # Canonical symlink for workflow engine
 ├── go/
 │   ├── README.md             # Go quick reference & CLI usage
 │   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
@@ -95,11 +94,8 @@ agentic-coding-guidelines/
 │       ├── bump.rb           # Semver bump & tag script (trusts .verified_head)
 │       ├── install.rb        # Copy/symlink bin/* into ~/bin
 │       └── dot_rubocop.yml   # Balanced RuboCop configuration template
-└── workflow/                 # Autonomous Review & Remediation Loop (review-cycle)
-    ├── README.md             # Architecture, 5-phase loop & 4:2:1 cadence spec
-    ├── bin/                  # Autonomous orchestration binaries
-    │   ├── review_cycle      # 5-phase closed-loop orchestration engine
-    │   └── audit             # Multi-lens adversarial code auditor (6 domain profiles)
+└── workflow/                 # Review-cycle CONTRACT (the engine lives in ~/prog/26/ruby/review_cycle)
+    ├── README.md             # What a repository provides: tools/gate, tools/build, tools/audit, review_cycle.json
     └── templates/            # Project configuration templates
         ├── review_cycle.json # Standard repository contract template
         └── AGENTS_SNIPPET.md # Drop-in documentation block for AGENTS.md
@@ -155,7 +151,7 @@ Once onboarded, maintainers and AI agents operate through 4 canonical commands:
 | **`tools/commit -m "..."`** | Guarded Git Commit | Multiple times daily | Runs `tools/gate`, stages changes, commits, records `.verified_head`, and pushes to remote. |
 | **`tools/bump`** | Milestone Release | Version milestones | Bumps the version, runs `tools/gate` unless `.verified_head` matches HEAD and only the version changed, tags, pushes, and runs `tools/install`. (Rust adds Tier 2/3 milestone checks.) |
 | **`tools/install`** | Install | After a release | Runs `tools/build`, then copies or symlinks the artifact into `~/bin`. The only script allowed to write outside the repository. |
-| **`review-cycle`** | Autonomous Remediation | Periodic / on-demand | 5-phase closed-loop engine: 6-lens audit $\to$ `bws` sandbox fix $\to$ gate verification $\to$ auto-commit. |
+| **`review-cycle`** | Autonomous Remediation | Periodic / on-demand | 5-phase closed-loop engine: 6-lens audit $\to$ `bws` sandbox fix $\to$ gate verification $\to$ auto-commit. Separate program (`~/prog/26/ruby/review_cycle`); this repo defines only its contract. |
 
 #### The `tools/build` contract
 
@@ -188,7 +184,7 @@ Add the directives to your AI prompt or system instructions:
 - **Validation**: Enforce compliance before committing using `rust-audit` (sizing, complexity & unwrap/unsafe audit) and `rust-static-analysis` (clippy, CVEs, supply-chain & unsafe review).
 
 ## Autonomous Review & Remediation Loop
-- **Engine**: Execute closed-loop review and remediation using `review-cycle` (or `./tools/review_cycle`).
+- **Engine**: Execute closed-loop review and remediation using `review-cycle` (installed from `~/prog/26/ruby/review_cycle` via its `tools/install --link review-cycle`).
 - **Lenses**: Audit across the 6 specialized domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`) via `audit`.
 - **Sandbox Isolation**: Remediation runs inside isolated [bws](https://github.com/sarielhp/bws) sandboxes with automated git squash-merge and rollback guards.
 - **Contract**: Define project gates, build commands, and file limits in `review_cycle.json` (or `tools/review_cycle.json`).
@@ -212,7 +208,8 @@ ln -sf $(pwd)/rust/bin/rust-static-analysis ~/bin/rust-static-analysis
 ln -sf $(pwd)/rust/bin/rust-install-tools ~/bin/rust-install-tools
 
 # Autonomous Review Workflow
-ln -sf $(pwd)/workflow/bin/review_cycle ~/bin/review-cycle
+# review-cycle is installed from its own repository:
+#   (cd ~/prog/26/ruby/review_cycle && tools/install --link review-cycle)
 ```
 
 ### 3. Run Audits & Workflows in Any Repository
