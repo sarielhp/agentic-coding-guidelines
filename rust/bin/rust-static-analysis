@@ -1,233 +1,50 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'open3'
 require 'optparse'
+require File.join(__dir__, 'analysis_support')
 
-ENV['PATH'] = "#{File.expand_path('~/.cargo/bin')}:#{ENV['PATH']}"
+CHECKS = {
+  clippy: ['cargo', 'clippy', '--offline', '--locked', '--workspace', '--all-targets', '--', '-D', 'warnings'].freeze,
+  audit: %w[cargo-audit audit].freeze,
+  deny: %w[cargo-deny deny check].freeze,
+  machete: %w[cargo-machete machete].freeze,
+  geiger: ['cargo-geiger', 'geiger', '--offline', '--locked', '--all-targets'].freeze,
+  outdated: %w[cargo-outdated outdated].freeze,
+  semver: %w[cargo-semver-checks semver-checks check-release].freeze
+}.freeze
+DEFAULT_CHECKS = %i[clippy audit deny machete geiger].freeze
+selected = []
+duplicates = false
+quiet = false
 
-options = {
-  clippy: false,
-  audit: false,
-  deny: false,
-  machete: false,
-  geiger: false,
-  dups: false,
-  quiet: false,
-  strict: false,
-  threshold: 50
-}
-
-OptionParser.new do |opts|
-  opts.banner = 'Usage: rust-static-analysis [options] [directory]'
-  opts.on('--clippy', 'Run only Clippy linter') { options[:clippy] = true }
-  opts.on('--audit', 'Run only dependency vulnerability check (cargo audit)') { options[:audit] = true }
-  opts.on('--deny', 'Run only supply chain, license & ban check (cargo deny)') { options[:deny] = true }
-  opts.on('--machete', 'Run only unused dependency scanner (cargo machete)') { options[:machete] = true }
-  opts.on('--geiger', 'Run only unsafe code usage auditor (cargo geiger)') { options[:geiger] = true }
-  opts.on('--outdated', 'Run only dependency freshness check (cargo outdated)') { options[:outdated] = true }
-  opts.on('--semver', 'Run only SemVer API compatibility check (cargo semver-checks)') { options[:semver] = true }
-  opts.on('--dups', 'Run only code duplication & clone detector (dupl)') { options[:dups] = true }
-  opts.on('-t', '--threshold TOKENS', Integer, "Duplication clone threshold (default: #{options[:threshold]})") { |v| options[:threshold] = v }
-  opts.on('-q', '--quiet', 'Show only sections with findings') { options[:quiet] = true }
-  opts.on('--strict', 'Exit with error code if any issues or findings are detected') { options[:strict] = true }
-  opts.on('-h', '--help', 'Show this help') do
-    puts opts
-    exit 0
-  end
-end.parse!
-
-target_dir = ARGV[0] ? File.expand_path(ARGV[0]) : Dir.pwd
-unless File.directory?(target_dir)
-  warn "Error: Target directory not found: #{target_dir}"
-  exit 1
-end
-
-Dir.chdir(target_dir)
-proj_name = File.basename(target_dir)
-
-run_all = !options[:clippy] && !options[:audit] && !options[:deny] && !options[:machete] && !options[:geiger] && !options[:dups]
-
-puts "\e[1m=== Rust Static Code Review (#{proj_name}) ===\e[0m\n"
-
-total_issues = 0
-
-def tool_available?(binary)
-  bin = `which #{binary} 2>/dev/null`.strip
-  !bin.empty? && File.executable?(bin)
-end
-
-# 1. Compiler Lints & Idioms (cargo clippy)
-if run_all || options[:clippy]
-  puts "\e[1;34m[1/6] Rust Compiler Lints & Idioms (cargo clippy)\e[0m"
-  out, err, status = Open3.capture3('cargo clippy --all-targets -- -D warnings')
-  if status.success?
-    puts "  \e[32m[PASS]\e[0m No clippy warnings or idiom violations found.\n\n"
-  else
-    clippy_errors = "#{out}\n#{err}".lines.select { |l| l.include?('error:') || l.include?('warning:') }
-    total_issues += [clippy_errors.size, 1].max
-    puts "  \e[31m[WARN]\e[0m Found #{clippy_errors.size} clippy finding(s):"
-    puts clippy_errors.map { |l| "    • #{l.strip}" }.join("\n")
-    puts "\n"
-  end
-end
-
-# 2. Dependency Vulnerabilities (cargo audit)
-if run_all || options[:audit]
-  puts "\e[1;34m[2/6] Dependency Vulnerabilities (cargo audit)\e[0m"
-  if !tool_available?('cargo-audit') && !system('cargo audit --version >/dev/null 2>&1')
-    puts "  \e[33m[SKIP]\e[0m cargo-audit not found in PATH (run rust-install-tools to install)\n\n"
-  else
-    out, err, status = Open3.capture3('cargo audit')
-    combined = "#{out}\n#{err}"
-    if status.success? && !combined.include?('Vulnerability')
-      puts "  \e[32m[PASS]\e[0m No known security vulnerabilities found in dependencies.\n\n"
-    else
-      vulns = combined.lines.select { |l| l =~ /ID:\s+RUSTSEC-/ || l.include?('Advisory:') || l.include?('Title:') }
-      total_issues += [vulns.size, 1].max
-      puts "  \e[31m[WARN]\e[0m Security advisories detected in crate dependencies:"
-      puts combined.lines.first(25).join
-      puts "\n"
+begin
+  OptionParser.new do |opts|
+    opts.banner = 'Usage: rust-static-analysis [checks] [directory]'
+    CHECKS.each_key { |key| opts.on("--#{key}", "Run #{key} check") { selected << key } }
+    opts.on('--dups', 'Run the project tools/check_duplicates provider') { duplicates = true }
+    opts.on('--strict', 'Compatibility option; failures always exit nonzero') { selected.uniq! }
+    opts.on('-q', '--quiet', 'Suppress headings') { quiet = true }
+    opts.on('-h', '--help', 'Show help') do
+      puts opts
+      exit
     end
-  end
-end
-
-# 3. Supply Chain & License Compliance (cargo deny)
-if run_all || options[:deny]
-  puts "\e[1;34m[3/6] Supply Chain & License Compliance (cargo deny)\e[0m"
-  if !tool_available?('cargo-deny') && !system('cargo deny --version >/dev/null 2>&1')
-    puts "  \e[33m[SKIP]\e[0m cargo-deny not found in PATH (run rust-install-tools to install)\n\n"
-  else
-    out, err, status = Open3.capture3('cargo deny check')
-    combined = "#{out}\n#{err}"
-    if status.success?
-      puts "  \e[32m[PASS]\e[0m Dependency licenses, bans, and sources compliant.\n\n"
-    else
-      total_issues += 1
-      puts "  \e[33m[WARN]\e[0m Cargo deny check produced warnings/errors:"
-      puts combined.lines.first(20).join
-      puts "\n"
+  end.parse!
+  abort 'expected at most one target directory' if ARGV.length > 1
+  Dir.chdir(File.realpath(ARGV.first || Dir.pwd))
+  ENV['PATH'] = (ENV.fetch('PATH', '').split(File::PATH_SEPARATOR) +
+    [File.join(ENV.fetch('CARGO_HOME', File.expand_path('~/.cargo')), 'bin')]).uniq.join(File::PATH_SEPARATOR)
+  AnalysisSupport.protect_target_dir
+  selected = DEFAULT_CHECKS if selected.empty? && !duplicates
+  selected.uniq.each { |key| AnalysisSupport.run(*CHECKS.fetch(key)) }
+  if duplicates
+    provider = File.join(Dir.pwd, 'tools/check_duplicates')
+    unless File.file?(provider) && File.executable?(provider)
+      abort 'Rust clone review requires an explicit executable tools/check_duplicates provider'
     end
+    AnalysisSupport.run(provider)
   end
+  puts 'Static review passed' unless quiet
+rescue StandardError => e
+  abort e.message
 end
-
-# 4. Unused Dependencies (cargo machete)
-if run_all || options[:machete]
-  puts "\e[1;34m[4/6] Unused Dependencies Scanner (cargo machete)\e[0m"
-  if !tool_available?('cargo-machete') && !system('cargo machete --version >/dev/null 2>&1')
-    puts "  \e[33m[SKIP]\e[0m cargo-machete not found in PATH (run rust-install-tools to install)\n\n"
-  else
-    out, err, status = Open3.capture3('cargo machete')
-    combined = "#{out}\n#{err}"
-    if combined.include?('ignored') || (!combined.include?('unused --') && status.success?)
-      puts "  \e[32m[PASS]\e[0m No unused dependencies found in Cargo.toml manifests.\n\n"
-    else
-      unused_lines = combined.lines.select { |l| l.include?('unused') || l.include?('dependencies') }
-      total_issues += [unused_lines.size, 1].max
-      puts "  \e[33m[WARN]\e[0m Potentially unused dependencies detected:"
-      puts combined
-      puts "\n"
-    end
-  end
-end
-
-# 5. Unsafe Code Usage Audit (cargo geiger)
-if run_all || options[:geiger]
-  puts "\e[1;34m[5/6] Unsafe Code Usage Audit (cargo geiger)\e[0m"
-  if !tool_available?('cargo-geiger') && !system('cargo geiger --version >/dev/null 2>&1')
-    puts "  \e[33m[SKIP]\e[0m cargo-geiger not found in PATH (run rust-install-tools to install)\n\n"
-  else
-    out, _, status = Open3.capture3('cargo geiger --forbid-only 2>/dev/null || cargo geiger')
-    if status.success?
-      puts "  \e[32m[PASS]\e[0m Unsafe code scan completed successfully.\n\n"
-    else
-      puts "  \e[33m[NOTICE]\e[0m Unsafe code detected in package graph."
-      puts out.lines.first(15).join
-      puts "\n"
-    end
-  end
-end
-
-# 6. Dependency Outdatedness Check (cargo outdated)
-if options[:outdated]
-  puts "\e[1;34m[*] Dependency Outdatedness Check (cargo outdated)\e[0m"
-  if !tool_available?('cargo-outdated') && !system('cargo outdated --version >/dev/null 2>&1')
-    puts "  \e[33m[SKIP]\e[0m cargo-outdated not found in PATH (run rust-install-tools to install)\n\n"
-  else
-    out, _, status = Open3.capture3('cargo outdated')
-    if status.success? && !out.include?('---')
-      puts "  \e[32m[PASS]\e[0m All dependencies are up to date.\n\n"
-    else
-      puts "  \e[33m[NOTICE]\e[0m Outdated dependencies found:"
-      puts out.lines.first(25).join
-      puts "\n"
-    end
-  end
-end
-
-# 7. SemVer API Compatibility (cargo semver-checks)
-if options[:semver]
-  puts "\e[1;34m[*] SemVer API Compatibility (cargo semver-checks)\e[0m"
-  if !tool_available?('cargo-semver-checks') && !system('cargo semver-checks --version >/dev/null 2>&1')
-    puts "  \e[33m[SKIP]\e[0m cargo-semver-checks not found in PATH (run rust-install-tools to install)\n\n"
-  else
-    out, err, status = Open3.capture3('cargo semver-checks check-release')
-    if status.success?
-      puts "  \e[32m[PASS]\e[0m No breaking SemVer changes detected.\n\n"
-    else
-      total_issues += 1
-      puts "  \e[31m[WARN]\e[0m Breaking SemVer changes detected:"
-      puts "#{out}\n#{err}".lines.first(20).join
-      puts "\n"
-    end
-  end
-end
-
-# 8. Structural Code Duplication (dupl / AST clones)
-if run_all || options[:dups]
-  puts "\e[1;34m[6/6] Code Duplication & Clone Detection (dupl)\e[0m"
-  if !tool_available?('dupl')
-    puts "  \e[33m[SKIP]\e[0m dupl not found in PATH (install via go-install-tools or go install github.com/mibk/dupl@latest)\n\n"
-  else
-    rs_files = `git ls-files '*.rs' 2>/dev/null`.lines.map(&:strip).reject { |f| f.end_with?('_tests.rs') || f.start_with?('tests/') }
-    if rs_files.empty?
-      rs_files = Dir.glob('**/*.rs').reject { |f| f.end_with?('_tests.rs') || f.include?('/tests/') || f.include?('/target/') }
-    end
-
-    if rs_files.empty?
-      puts "  \e[32m[PASS]\e[0m No Rust files to check.\n\n"
-    else
-      out, _, _ = Open3.capture3("dupl -threshold #{options[:threshold]} #{rs_files.join(' ')}")
-      clones = out.strip
-      if clones.empty? || clones.include?('Found total 0 clone groups.')
-        puts "  \e[32m[PASS]\e[0m No duplicate code clones found (threshold: #{options[:threshold]} tokens).\n\n"
-      else
-        clone_count = clones[/Found total (\d+) clone groups/, 1] || 'some'
-        total_issues += clone_count.to_i
-        puts "  \e[33m[WARN]\e[0m Found #{clone_count} duplicate clone group(s):"
-        clones.lines.first(25).each do |line|
-          line = line.chomp
-          next if line.empty?
-
-          if line.start_with?('found ')
-            puts "    \e[1m#{line}\e[0m"
-          elsif line.start_with?('Found total')
-            puts "    \e[33m#{line}\e[0m"
-          else
-            puts "      #{line}"
-          end
-        end
-        puts "\n"
-      end
-    end
-  end
-end
-
-puts "\e[1mReview Summary:\e[0m #{total_issues} advisory finding(s) across all checks."
-
-if options[:strict] && total_issues.positive?
-  warn "\e[31mReview failed with #{total_issues} finding(s) in strict mode.\e[0m"
-  exit 1
-end
-
-exit 0

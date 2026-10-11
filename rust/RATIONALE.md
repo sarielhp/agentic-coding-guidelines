@@ -116,10 +116,16 @@ Autonomous agents optimize for linter exit code 0. In Rust, this tendency trigge
 
 ---
 
-## 6. The 3-Tier Quality & Milestone Strategy (from `dider`)
+## 6. Quality gates and milestone strategy
 
-Static analysis and test suites have varying runtimes and scopes. Following the battle-tested model in `dider`:
+Daily feedback should stay focused: formatting, compiler lints, sizing, offline locked tests, and a release build. Runtime depends on project size and warmed caches rather than a fixed five-second guarantee. Offline dependency resolution does not sandbox test behavior.
 
-- **Tier 1: Fast Quality Gate (`tools/gate` / `rust-audit`)**: Under 5 seconds. Checks formatting (`cargo fmt`), compiler lints (`cargo clippy`), cognitive sizing (`rust-audit`), and hermetic offline tests (`cargo test`). Runs on every edit and commit.
-- **Tier 2: Milestone Review & Benchmark (`rust-static-analysis` / `tools/benchmark`)**: Runs on every 5th bump. Checks dependency vulnerabilities (`cargo audit`), license/bans (`cargo deny`), unused crates (`cargo machete`), and native benchmarks.
-- **Tier 3: Deep Toolchain Integration (`tools/test_deep`)**: Runs on every 20th bump. Checks external compiler pipelines (`latexmk`, `pdflatex`, `tesseract`, network APIs) without slowing daily velocity.
+Dependency and unsafe-code review protects each release and therefore runs on every bumped version. Performance and expensive external integrations retain the fifth- and twentieth-bump cadence when explicitly configured. A missing configured suite is an error; disabling a suite is a visible settings choice.
+
+## Publication and installation evidence
+
+A successful local commit says nothing about remote publication. Checking every Git exit status, pushing a specific branch/tag atomically, and reading back their exact commits prevents scripts from printing success after rejected or misdirected pushes. A pending release record supports inspection and retry without incrementing the version again.
+
+HEAD alone does not identify checked code. Dirty sources, ignored configuration, generated version files, tool changes, and environment can alter the result. Structured verification binds the checked inputs and check level; release bumps always run full checks after version and lock changes. Checks must not rewrite those inputs.
+
+Build, gate, publication, and installation have different effects. Separating them keeps routine checking inside the repository and makes installation an explicit action against declared artifacts and destinations. Content and permission verification avoids running arbitrary installed programs merely to determine whether copying worked.

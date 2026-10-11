@@ -78,30 +78,31 @@ agentic-coding-guidelines/
 │   ├── bin/                  # Standalone verification CLI tools
 │   │   ├── rust-audit        # Sizing, cognitive complexity & unwrap/safety auditor
 │   │   ├── rust-static-analysis # Multi-linter orchestrator (clippy, audit, deny, machete, geiger)
+│   │   ├── analysis_support.rb # Required wrapper support
 │   │   └── rust-install-tools# Automated cargo tools installer into ~/.cargo/bin/
 │   └── templates/            # Reusable project workflow templates
-│       ├── Makefile.snippet  # Standard Makefile targets
-│       ├── build.rb          # tools/build: artifact only, repo-local, no tests/linters
-│       ├── gate.rb           # tools/gate: Tier 1 quality gate (tools/check = symlink)
-│       ├── commit.rb         # Gated commit with .verified_head
-│       ├── bump.rb           # 3-Tier milestone version bump & install script
-│       └── install.rb        # Direct cargo install --root ~ script
+│       ├── settings.rb      # Cargo layout, version, milestone and install settings
+│       ├── tooling.rb/language.rb # Copied lifecycle and Rust implementation
+│       ├── AGENTS_SNIPPET.md # Exact commands and authorization boundaries
+│       ├── Makefile.snippet  # Delegates to canonical scripts
+│       └── *.rb             # build/lint/test/gate/check/snapshot/commit/bump/install/release
 ├── ruby/
 │   ├── README.md             # Ruby quick reference & CLI usage
 │   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
 │   ├── RATIONALE.md          # Deep-dive philosophy, block scoping, GC memory churn
 │   ├── bin/                  # Standalone verification CLI tools
 │   │   ├── ruby-audit        # AST cognitive complexity, depth & sizing auditor
-│   │   ├── ruby-static-analysis # Multi-linter orchestrator (syntax, rubocop, bundle-audit, dupl)
+│   │   ├── ruby-static-analysis # Required syntax, RuboCop, dependency and Flay checks
+│   │   ├── analysis_support.rb # Required wrapper support
 │   │   └── ruby-install-tools# Automated gem and tooling auditor/installer
 │   └── templates/            # Reusable project workflow templates
-│       ├── Makefile.snippet  # Standard Makefile targets
-│       ├── build.rb          # tools/build: artifact only, repo-local, no tests/linters
-│       ├── gate.rb           # tools/gate: Tier 1 quality gate (tools/check = symlink)
-│       ├── commit.rb         # Gated commit with .verified_head
-│       ├── bump.rb           # Semver bump & tag script (trusts .verified_head)
-│       ├── install.rb        # Copy/symlink bin/* into ~/bin
+│       ├── settings.rb      # Ruby scope, tests, version, artifact and install settings
+│       ├── tooling.rb/language.rb # Copied lifecycle and Ruby implementation
+│       ├── AGENTS_SNIPPET.md # Exact commands and authorization boundaries
+│       ├── Makefile.snippet  # Delegates to canonical scripts
+│       ├── *.rb             # build/lint/test/gate/check/snapshot/commit/bump/install/release
 │       └── dot_rubocop.yml   # Balanced RuboCop configuration template
+├── test/                     # Rust/Ruby lifecycle, analyzer and real language fixtures
 └── workflow/                 # Review-cycle CONTRACT (the engine lives in ~/prog/26/ruby/review_cycle)
     ├── README.md             # What a repository provides: tools/gate, tools/build, review_cycle.json
     └── templates/            # Project configuration templates
@@ -115,30 +116,9 @@ agentic-coding-guidelines/
 
 To bring any new or existing repository under these standards in 3 deterministic steps:
 
-### Step 1: Adopt Language Workflow Templates
-Copy the standard quality gates, bumper, and guarded commit harness into your project's `tools/` directory:
+### Step 1: Adopt language workflow templates
 
-For **Go**, follow [the Go onboarding guide](go/README.md#adopt-the-repository-interface):
-copy build/gate/check/lint/snapshot/commit/bump/install/release under their canonical
-names, plus `settings.rb` and `tooling.rb` unchanged. Adapt settings and ignore
-declared build artifacts. The following existing copy procedure applies to
-**Ruby and Rust**, whose workflow behavior is unchanged:
-
-```bash
-mkdir -p tools
-LANG=ruby   # or rust; Go additionally needs its copied helper/settings files
-
-# Lifecycle scripts, installed under their canonical names (no .rb extension):
-for t in build gate commit bump install; do
-  [ -f ~/prog/standards/$LANG/templates/$t.rb ] && cp ~/prog/standards/$LANG/templates/$t.rb tools/$t
-done
-chmod +x tools/*
-ln -sf gate tools/check          # compatibility alias: tools/check == tools/gate
-
-# Ruby only: lint baseline and the version pin read by RuboCop and mise/rbenv
-cp ~/prog/standards/ruby/templates/dot_rubocop.yml .rubocop.yml
-ruby -e 'puts RUBY_VERSION' > .ruby-version
-```
+Follow the language-specific bootstrap instructions in [Go](go/README.md), [Rust](rust/README.md), or [Ruby](ruby/README.md). Copy the entry points together with their helpers and settings; adapt the project artifact layout, checks, version source, and installation destinations. Include that language's Makefile and agent snippets. Existing projects require explicit migration; these templates do not update them automatically.
 
 ### Step 2: Bootstrap the Review & Quality Contract
 Run the idempotent onboarding command from the root of your project:
@@ -154,25 +134,24 @@ This automatically:
 - Enforces Git hygiene by appending `reviews/archive/` and `reviews/logs/` to `.gitignore`.
 - Appends the standard review cycle specification block to `AGENTS.md`.
 
-### Step 3: Repository Lifecycle
+### Step 3: Repository lifecycle
 
-Go's canonical interface is documented in
-[GUIDELINES §8](go/GUIDELINES.md#8-repository-tooling-interface): build, gate/check,
-lint, snapshot, commit, bump, install, and release. `tools/commit <message>` is
-local and does not push. Bump validates and pushes to a verified upstream;
-installation is separate or explicitly selected with `tools/release --install`.
-Fast verification cannot replace full release checking. Gates finish with a build.
+All three languages use the same separation of build, checking, local commits, publication, and explicit installation. Read the language settings and guidelines for check scope and version behavior.
 
-The existing **Ruby/Rust** lifecycle below retains its language-specific behavior:
+| Command | Behavior |
+|---|---|
+| `tools/build` | Produce/validate repository artifacts; no checks or installation. |
+| `tools/lint`, `tools/test` | Separate static feedback and tests. |
+| `tools/gate`, `tools/check` | Canonical fast gate; add `--full` for release checks. |
+| `tools/snapshot [message]` | Ungated local checkpoint, bypassing commit hooks. |
+| `tools/commit [--full] <message>` | Checked local commit; structured verification records checked inputs and level. |
+| `tools/bump` | Version change, full gate, commit, and verified push to the configured upstream; no installation. |
+| `tools/bump --resume` | Resume an inspected interrupted release without another bump. |
+| `tools/install` | Build and verify declared installation targets when installation is authorized. |
+| `tools/release [--install] <message>` | Commit and publish; installation only with `--install`. |
+| `review-cycle` | Separate remediation engine; uses the project's build/gate contract. |
 
-| Command | Lifecycle Role | Frequency | Description |
-| :--- | :--- | :--- | :--- |
-| **`tools/build`** | Build Contract | Called by gate, install, review-cycle | Produces or validates the artifact inside the repo. Never writes outside it, never runs tests or linters. May be trivial (a syntax check for Ruby). |
-| **`tools/gate`** | Fast Quality Gate | Every edit / pre-commit | Tier 1 gate: unit tests, formatting, linter, cognitive complexity limits; runtime depends on the project. |
-| **`tools/commit <message>`** | Guarded Git Commit | Multiple times daily | Runs `tools/gate`, stages changes, commits, and records `.verified_head`; consult each language template for publication behavior. |
-| **`tools/bump`** | Milestone Release | Version milestones | Bumps the version, runs `tools/gate` unless `.verified_head` matches HEAD and only the version changed, tags, pushes, and runs `tools/install`. (Rust adds Tier 2/3 milestone checks.) |
-| **`tools/install`** | Install | After a release | Runs `tools/build`, then copies or symlinks the artifact into `~/bin`. The only script allowed to write outside the repository. |
-| **`review-cycle`** | Autonomous Remediation | Periodic / on-demand | 5-phase closed-loop engine: 6-lens audit $\to$ `bws` sandbox fix $\to$ gate verification $\to$ auto-commit. Separate program (`~/prog/26/ruby/review_cycle`); this repo defines only its contract. |
+Missing tools and failed commands stop the workflow. Bootstrap remains separate. Bumps check changed versions fully and verify remote refs. Compiler/dependency caches may be external; repository artifacts stay inside the repository. Reuse session authorization while keeping sandboxing and manual approval review enabled.
 
 #### The `tools/build` contract
 
@@ -181,7 +160,7 @@ Every repository carries a `tools/build`, even when it is almost empty, so no to
 - It produces or validates the artifact **inside the repository** and exits non-zero on failure (`cargo build --release`, `go build ./...`, `ruby -cw` over the sources).
 - Repository artifacts stay inside the repository. Compiler/module caches may be external. Installing is `tools/install`'s job, and `tools/install` calls `tools/build` first.
 - It runs **no tests and no linters**. Build answers "does the artifact exist and parse"; `tools/gate` answers "is it good". A build that grows into a second gate makes the review cycle pay twice.
-- Go's gate calls build once after successful checks and tests. Existing Ruby/Rust gates retain their language-specific ordering. Keep build validation defined in the build entry point.
+- Go and Rust gates call build once after successful checks and tests; Ruby checks syntax once before its analyzers and tests. Keep build validation defined in the build entry point.
 
 `review-cycle --setup` warns when `tools/build` is missing and never falls back to `tools/install`.
 
@@ -204,6 +183,11 @@ Add the directives to your AI prompt or system instructions:
 - **Rationale**: Consult `~/prog/standards/rust/RATIONALE.md` for the empirical reasoning, borrow-checker anti-decomposition constraints, and 3-tier milestone strategy.
 - **Validation**: Enforce compliance before committing using `rust-audit` (sizing, complexity & unwrap/unsafe audit) and `rust-static-analysis` (clippy, CVEs, supply-chain & unsafe review).
 
+## Ruby Engineering Standards
+- **Guidelines**: Follow `~/prog/standards/ruby/GUIDELINES.md` for method/file tiers, cognitive limits, idioms, and standalone scope.
+- **Rationale**: Consult `~/prog/standards/ruby/RATIONALE.md` for block scoping, allocations, and anti-decomposition rules.
+- **Validation**: Small standalone scripts use syntax and strict `ruby-audit`; projects use the fast gate and full RuboCop/dependency/Flay review before release.
+
 ## Autonomous Review & Remediation Loop
 - **Engine**: Execute closed-loop review and remediation using `review-cycle` (installed from `~/prog/26/ruby/review_cycle` via its `tools/install --link review-cycle`).
 - **Lenses**: Audit across the 6 specialized domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`) via `audit`.
@@ -213,20 +197,25 @@ Add the directives to your AI prompt or system instructions:
 
 ### 2. Install the CLI Tools
 
-Symlink the tools into your `$PATH` (e.g. `~/bin/`):
+When installation is requested and allowed by your environment, symlink the tools into your `$PATH` (e.g. `~/bin/`). Keep each wrapper's support files in its standards directory:
 
 ```bash
-mkdir -p ~/bin
+rtk proxy mkdir -p ~/bin
 
 # Go Tools
-ln -sf $(pwd)/go/bin/go-audit ~/bin/go-audit
-ln -sf $(pwd)/go/bin/go-static-analysis ~/bin/go-static-analysis
-ln -sf $(pwd)/go/bin/go-install-tools ~/bin/go-install-tools
+rtk proxy ln -sf "$PWD/go/bin/go-audit" ~/bin/go-audit
+rtk proxy ln -sf "$PWD/go/bin/go-static-analysis" ~/bin/go-static-analysis
+rtk proxy ln -sf "$PWD/go/bin/go-install-tools" ~/bin/go-install-tools
 
 # Rust Tools
-ln -sf $(pwd)/rust/bin/rust-audit ~/bin/rust-audit
-ln -sf $(pwd)/rust/bin/rust-static-analysis ~/bin/rust-static-analysis
-ln -sf $(pwd)/rust/bin/rust-install-tools ~/bin/rust-install-tools
+rtk proxy ln -sf "$PWD/rust/bin/rust-audit" ~/bin/rust-audit
+rtk proxy ln -sf "$PWD/rust/bin/rust-static-analysis" ~/bin/rust-static-analysis
+rtk proxy ln -sf "$PWD/rust/bin/rust-install-tools" ~/bin/rust-install-tools
+
+# Ruby Tools
+rtk proxy ln -sf "$PWD/ruby/bin/ruby-audit" ~/bin/ruby-audit
+rtk proxy ln -sf "$PWD/ruby/bin/ruby-static-analysis" ~/bin/ruby-static-analysis
+rtk proxy ln -sf "$PWD/ruby/bin/ruby-install-tools" ~/bin/ruby-install-tools
 
 # Autonomous Review Workflow
 # review-cycle is installed from its own repository:
@@ -258,7 +247,7 @@ review-cycle -p security      # Target a specific lens profile directly
 - [x] **Autonomous Review Loop**: 5-phase closed-loop engine, 6 adversarial audit lenses, 4:2:1 model cadence, test-weakening guard, and [bws](https://github.com/sarielhp/bws) sandbox integration.
 - [x] **Go**: Cognitive sizing, Google Go idioms, two-tier static review tooling.
 - [x] **Rust**: Cognitive sizing, borrow-checker anti-patterns, `let-else` idioms, 3-tier milestone releases & static analysis tooling.
-- [ ] **Ruby**: Cognitive complexity, rubocop orchestration, agentic refactoring rules.
+- [x] **Ruby**: Cognitive complexity, RuboCop/Flay review, scoped script rules, verified lifecycle tooling.
 - [ ] **Python**: Function tiering, ruff/mypy integration, anti-decomposition discipline.
 
 ---

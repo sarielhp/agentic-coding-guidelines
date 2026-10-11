@@ -1,53 +1,30 @@
-# Standard Ruby Quality Targets (include or adapt in project Makefile)
-# Lifecycle scripts live in tools/ (copied from ~/prog/standards/ruby/templates/).
-
-.PHONY: all build gate check ci lint audit review static-analysis test commit bump install clean
-
-all: gate
-
-# Build / syntax validation only (no tests, no linters, writes nothing outside the repo)
+# Copy or include; use tools/commit directly for messages with shell metacharacters.
+.PHONY: all build gate check ci lint snapshot commit bump install release test audit review static-analysis
+all: build
 build:
 	tools/build
-
-# Fast everyday gate: build, ruby-audit metrics, rubocop, tests
 gate:
-	tools/gate
-
-# Compatibility alias (tools/check is a symlink to tools/gate)
-check: gate
-
-ci: gate
-
-# Sizing & cognitive complexity audit
-audit:
-	ruby-audit
-
-# Fast static linting
+	tools/gate $(ARGS)
+check:
+	tools/check $(ARGS)
+ci:
+	tools/gate --full
 lint:
-	tools/build
-	rubocop --parallel
-	ruby-audit --quiet
-
-# Deep multi-tool static analysis
+	tools/lint
+snapshot:
+	tools/snapshot $(ARGS)
+commit:
+	tools/commit "$(msg)"
+bump:
+	tools/bump $(ARGS)
+install:
+	tools/install $(ARGS)
+release:
+	tools/release $(ARGS)
+test:
+	tools/test
+audit:
+	ruby-audit --strict --quiet .
 review: static-analysis
 static-analysis:
 	ruby-static-analysis
-
-# Offline unit tests
-test:
-	bundle exec rake test || ruby -Ilib:test test/*_test.rb
-
-# Gated commit (runs gate first, stages, commits, records .verified_head, pushes)
-commit:
-	tools/commit "$(msg)"
-
-# Bump version, verify (or trust .verified_head), commit, tag, push, install
-bump:
-	tools/bump
-
-# Install bin/* into ~/bin (tools/install --link for symlinks)
-install:
-	tools/install
-
-clean:
-	rm -rf .bundle/ tmp/ coverage/

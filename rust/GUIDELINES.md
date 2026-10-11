@@ -116,28 +116,39 @@ When refactoring functions that exceed complexity or line limits, AI agents must
 
 ---
 
-## 7. Quality Gates & Multi-Tier Verification
+## 7. Quality gates and milestone checks
 
-Compliance is automated via a 3-tier milestone verification strategy:
+The fast gate runs formatting, Clippy with warnings denied, strict `rust-audit`, offline locked all-target tests, then one release build. Runtime depends on project size and cache state. Offline mode requires dependency caches to be prepared separately; it does not make tests hermetic or prohibit their own filesystem/network access.
 
-### Tier 1: Fast Quality Gate (`tools/gate` / `rust-audit`)
-- Must run in **< 5 seconds**, 100% hermetic and offline.
-- Executed on every edit, commit, and version bump.
-- Verifies:
-  - Formatting: `cargo fmt --check`
-  - Linting: `cargo clippy --all-targets -- -D warnings`
-  - Sizing & Cognitive Complexity: `rust-audit`
-  - Offline Unit Tests: `cargo test`
+Every release runs the full gate on the changed version, adding required cargo-audit, cargo-deny, cargo-machete, and cargo-geiger checks. These analyzers may require advisory data or network access. The standalone `rust-static-analysis` runs the same deep analyzer set plus Clippy by default; explicit flags select only those analyzers. Failures and missing selected tools are fatal, including without `--strict`.
 
-### Tier 2: Milestone Review & Deep Analysis (`rust-static-analysis` / `tools/benchmark`)
-- Executed periodically or automatically on **every 5th version bump**.
-- Runs deep analysis:
-  - Dependency Vulnerabilities: `cargo audit` (RustSec CVE advisory database)
-  - Supply Chain & Licenses: `cargo deny check` (licenses, bans, advisories)
-  - Unused Dependencies: `cargo machete` (scans `Cargo.toml`)
-  - Unsafe Code Audit: `cargo geiger` (finds and counts `unsafe` usage)
-  - Native Performance Benchmark: `./tools/benchmark --rust-only`
+Milestone counts remain in the configured `BUMP_STATE` file. A configured `BENCHMARK` command is required on every fifth bump; a configured `DEEP_TEST` command is required on every twentieth bump. Both default to `nil`, an explicit project choice to disable that suite. Set commands in `tools/settings.rb`; a failing or missing configured command stops publication. Invalid milestone state requires repair and is never silently reset.
 
-### Tier 3: Deep Toolchain & Compiler Integration (`tools/test_deep`)
-- Executed automatically on **every 20th version bump** or before major releases.
-- Runs heavy integration suites requiring external compilers (`latexmk`, `pdflatex`, `tesseract`, Docker, live network APIs).
+`rust-static-analysis --dups` requires an executable project `tools/check_duplicates` provider. There is no universal Rust clone detector in this template; configure a language-capable analyzer explicitly. `--outdated` and `--semver` select their respective separately installed Cargo plugins. See [README.md](README.md) for workspace version and artifact configuration.
+
+## Repository lifecycle
+
+Copy the templates into the project; the helpers load project-local settings and never load a live standards checkout. Configure `tools/settings.rb` before use. Make targets delegate to the same executable scripts.
+
+| Command | Behavior |
+|---|---|
+| `tools/build` | Produce or validate repository artifacts; no tests, linting, installation, or publication. |
+| `tools/lint` | Required fast analyzers; missing executables and failed subprocesses stop the command. |
+| `tools/test` | Run the configured language test suite. |
+| `tools/gate`, `tools/check` | Identical fast gate, with one build and one test run. Add `--full` for deep review. |
+| `tools/snapshot [message]` | Ungated local checkpoint, bypassing commit hooks; use only when a checkpoint is intended. |
+| `tools/commit [--full] <message>` | Gate, stage, and commit locally. A structured verification record can reuse checks only for matching HEAD, inputs, tools, environment, and check level. |
+| `tools/bump [major\|minor\|patch]` | Require a clean tree and configured branch upstream; update version, run the full gate, commit, tag, and push. Default is patch. |
+| `tools/bump --resume` | Resume an inspected interrupted release at its pending version, never bumping again. |
+| `tools/install [names...]` | Build, then install only selected declared artifacts to declared absolute destinations; verify bytes and executable permissions. |
+| `tools/release [--install] <message>` | Local gated commit followed by full-checked bump and verified publication. Installation requires `--install`. |
+
+Bumps never trust the old `.verified_head` marker or assume a version-only edit is safe. Version changes, lock synchronization, and version-generation commands happen before checks. Publication pushes only the release commit to its configured upstream branch and the requested annotated tag; it verifies the exact remote branch and peeled tag commit. No unrelated tags are pushed. The remote must support atomic pushes. `RELEASE_TAG = false` explicitly disables tagging.
+
+An interrupted bump leaves files, commits, tags, and `.git/tooling-release.json` available for inspection. Repair the cause and use `--resume`; a committed release rejects changed HEAD, worktree, or checked inputs. If installation fails after publication, the command reports that publication succeeded and installation failed. It does not claim the release was rolled back.
+
+Installation is disabled until `INSTALL_TARGETS` declares artifact-to-destination mappings. Libraries can use `ARTIFACTS = []`. Undeclared names, escaping artifact paths, and unrelated destination symlinks fail. Checking or committing never installs. Tool bootstrap is a separate authorized action; missing analyzers never trigger installation.
+
+`TOOLS` supplies explicit executable overrides. `FAST_CHECKS`, `FULL_CHECKS`, and `VERSION_UPDATE` contain argument arrays, not shell strings. Declare ignored generated/configuration inputs in `VERIFICATION_INPUTS`; verification includes tracked and unignored files, copied tooling, required language inputs, tool identities, and relevant environment. Compiler and dependency caches may be external; project artifacts remain inside the repository.
+
+Run routine checks for authorized work and reuse authorization given in the session. Command approval permits execution; it does not authorize unrelated publication, installation, or filesystem writes. Keep sandboxing and manual approval review enabled. Read [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md) for exact command forms.

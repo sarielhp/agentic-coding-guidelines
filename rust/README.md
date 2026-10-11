@@ -1,66 +1,63 @@
-# Rust Engineering Standards & Tooling
+# Rust engineering standards and tooling
 
-This directory defines the authoritative architecture, cognitive complexity boundaries, and automated tooling for Rust projects.
+[GUIDELINES.md](GUIDELINES.md) defines architecture, cognitive limits, idioms, and the lifecycle. [RATIONALE.md](RATIONALE.md) explains the design. Existing sizing, unwrap, unsafe, and borrow-checker rules remain in force.
 
-## Directory Structure
+`bin/rust-audit` is the standalone sizing/idiom auditor. `bin/rust-static-analysis` runs required Clippy, cargo-audit, cargo-deny, cargo-machete, and cargo-geiger review; flags select individual checks. `bin/analysis_support.rb` must remain beside the wrapper. `rust-install-tools` is the separately invoked tool bootstrapper. Run them by absolute path or explicitly authorize symlink installation into `~/bin`; this workflow does not install them automatically.
 
-```text
-~/prog/standards/rust/
-├── README.md                 # Quick overview & installation guide
-├── GUIDELINES.md             # Operational AI Agentic Rust Architecture Guide
-├── RATIONALE.md              # Empirical philosophy, cognitive science & anti-patterns
-├── bin/                      # Shared standalone CLI tools
-│   ├── rust-audit            # Sizing, cognitive complexity & unwrap/safety auditor
-│   ├── rust-static-analysis  # Multi-linter static analysis orchestrator (clippy, audit, deny, machete, geiger)
-│   └── rust-install-tools    # Installs cargo audit tools into ~/.cargo/bin/
-└── templates/                # Reusable project workflow templates
-    ├── build.rb              # tools/build: cargo build --release, no tests/linters
-    ├── gate.rb               # tools/gate: Tier 1 quality gate (tools/check = symlink)
-    ├── commit.rb             # Gated commit with .verified_head
-    ├── bump.rb               # 3-Tier milestone version bump & install script
-    ├── install.rb            # Direct cargo install --root ~ script
-    └── Makefile.snippet      # Standard Makefile quality targets
-```
+`templates/` contains the entry points, copied `tooling.rb`/`language.rb` helpers, `settings.rb`, `AGENTS_SNIPPET.md`, `Makefile.snippet`, and optional `clippy.toml`. Portable shared acceptance tests live in `../test/`.
 
-## Tooling Quick Reference
+## Adopt the workflow
 
-| Tool | Purpose | Primary Triggers |
-|---|---|---|
-| `rust-audit [dir]` | Audits functions against cognitive limits (depth $\le 4$, branches $\le 15$, tiered lines), `.unwrap()` violations, terminal `else`, and bare `unsafe`. | Pre-commit / `make audit` |
-| `rust-static-analysis [dir]` | Runs `cargo clippy`, `cargo audit`, `cargo deny`, `cargo machete`, `cargo geiger`, and `dupl` (with `--outdated` and `--semver` flags). | Periodic / Milestone / `make review` |
-| `rust-install-tools` | Installs the complete suite of 10 cargo analysis & productivity tools into `~/.cargo/bin/` (accelerated with `cargo-binstall`). | Once per machine |
-
-### Tools Managed by `rust-install-tools`:
-1. **`cargo-binstall`**: Fast binary installer for official release binaries.
-2. **`cargo-audit`**: Security vulnerabilities & CVEs (RustSec Advisory Database).
-3. **`cargo-deny`**: Supply-chain security, licenses, and crate bans.
-4. **`cargo-machete`**: Unused dependencies scanner in `Cargo.toml`.
-5. **`cargo-geiger`**: Unsafe code usage auditor.
-6. **`cargo-nextest`**: Ultra-fast, isolated parallel test runner.
-7. **`cargo-mutants`**: Mutation testing engine to audit test suite quality.
-8. **`cargo-semver-checks`**: Semantic versioning & API breaking change detector.
-9. **`cargo-outdated`**: Dependency freshness and outdatedness checker.
-10. **`cargo-expand`**: Macro expansion and compiler desugaring inspector.
-
-## Installation & Linking to `~/bin/`
-
-To make these tools globally available from anywhere in your shell and Makefiles:
+Copy every Ruby template, preserving `.rb` on `settings.rb`, `tooling.rb`, and `language.rb`. Entry points are installed without `.rb`:
 
 ```bash
-mkdir -p ~/bin
-ln -sf ~/prog/standards/rust/bin/rust-audit ~/bin/rust-audit
-ln -sf ~/prog/standards/rust/bin/rust-static-analysis ~/bin/rust-static-analysis
-ln -sf ~/prog/standards/rust/bin/rust-install-tools ~/bin/rust-install-tools
-chmod +x ~/prog/standards/rust/bin/*
+rtk proxy mkdir -p tools
+for source in ~/prog/standards/rust/templates/*.rb; do
+  name=${source##*/}
+  case "$name" in settings.rb|tooling.rb|language.rb) ;; *) name=${name%.rb} ;; esac
+  rtk proxy cp "$source" "tools/$name"
+done
+rtk proxy chmod +x tools/build tools/lint tools/test tools/gate tools/check tools/snapshot tools/commit tools/bump tools/install tools/release
 ```
 
-## Agent Configuration (`~/.gemini/AGENTS.md`)
+Read and adapt `tools/settings.rb`. Include `templates/Makefile.snippet` in the project Makefile; targets delegate to canonical scripts. Copy [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md) into project agent instructions. The helpers are copied project assets; updating this standards repository does not upgrade existing projects automatically.
 
-Add the following to your global agent instructions:
+| Entry point | Contract |
+|---|---|
+| `build`, `lint`, `test` | Separate build, static feedback, and test commands. |
+| `gate`, `check` | One fast gate; `--full` adds release analysis. |
+| `snapshot [message]` | Ungated local checkpoint, bypassing commit hooks. |
+| `commit [--full] <message>` | Verified local commit; no push. |
+| `bump [major\|minor\|patch]` | Full-checked version change and verified atomic upstream publication. |
+| `bump --resume` | Resume an inspected failed release without another version change. |
+| `install [names...]` | Build and verify only declared installation targets. |
+| `release [--install] <message>` | Commit and publish a patch release; installation opt-in. |
 
-```markdown
-## Rust Engineering Standards
-- **Guidelines**: For any Rust project, strictly adhere to the architecture, cognitive complexity limits, `let-else` guard idioms, and anti-clone rules defined in `~/prog/standards/rust/GUIDELINES.md`.
-- **Rationale**: Consult `~/prog/standards/rust/RATIONALE.md` for the empirical reasoning, borrow-checker anti-decomposition constraints, and 3-tier milestone strategy.
-- **Validation**: Enforce compliance before committing using `rust-audit` (sizing, complexity & unwrap/unsafe audit) and `rust-static-analysis` (clippy, CVEs, supply-chain & unsafe review).
-```
+Use `rtk proxy tools/<command>` for these entry points. Pass the commit message as one literal argument. Use scripts directly for messages containing shell metacharacters; Make interpolation is not an escaping boundary. `tools/check` delegates to `tools/gate`, and `make ci` delegates to the full gate.
+
+## Release and installation configuration
+
+Releases require an attached branch, its configured remote branch upstream, and exactly one push URL. Bumps require a clean tree and strict `major.minor.patch` version. Full checks run after all version-dependent files are updated. The requested annotated tag and exact commit go to the configured upstream branch; remote SHA verification includes the peeled tag. Unrelated tags remain local. Missing analyzers, failed stages, unsupported atomic push, or remote mismatch fail the command.
+
+Interrupted releases retain `.git/tooling-release.json`. Inspect the failure and local state, repair the cause, then run `tools/bump --resume`. It never increments the pending version. It rejects changed committed inputs; do not bypass this by editing the verification record. Legacy `.verified_head` markers are ignored.
+
+`INSTALL_TARGETS = { 'artifact/path' => '/absolute/authorized/destination' }.freeze` declares installation scope. The default empty mapping disables installation. Targets must refer to declared `ARTIFACTS`, or language-discovered artifacts. Installation runs `tools/build` and verifies installed content and permissions. A declaration describes scope; user authorization and sandbox permissions still govern external writes.
+
+Set `TOOLS` overrides when an executable is not on PATH. Additional `FAST_CHECKS`, `FULL_CHECKS`, and `VERSION_UPDATE` commands are argument arrays. Freeze nested arrays as well as the outer array. Add ignored inputs to `VERIFICATION_INPUTS`; they participate in verification. Tool bootstrap remains a separate authorized step.
+
+## Migration from the old templates
+
+Replace the entry points together with their helpers; do not mix old and new script versions. Commits are local, bumps always perform full checks, and install targets must be declared. Bumps no longer install automatically. Use positional `major`/`minor`/`patch` instead of legacy flags, and use `release --install` only for an authorized installation. Release artifacts stay inside the repository until the explicit installer copies them.
+
+The `--strict` analyzer option remains accepted, but failures now always exit nonzero. No analyzer is silently skipped or installed by a gate. Reconcile project-specific checks, version generation, and existing installation targets in settings before replacing scripts.
+## Cargo layouts and milestone suites
+
+The default build uses `--workspace` and discovers workspace binary targets through Cargo metadata. Root binaries, explicit `[[bin]]` layouts, multi-binary workspaces, and library-only packages are supported. Declared binary outputs must exist and be executable after the build. For a library use `ARTIFACTS = []`; installation remains disabled. For cross compilation, set `BUILD_ARGS` (for example `['--workspace', '--target', 'aarch64-unknown-linux-gnu'].freeze`) and explicit artifact paths beneath the configured target directory. Ignore generated build outputs in the project `.gitignore`; gates reject changes to checked source/configuration inputs.
+
+`TARGET_DIR` defaults to `target` and must stay inside the repository, including through symlinks. It overrides external `CARGO_TARGET_DIR` and Cargo configuration for build/test/Clippy commands. Never hide an escaping output directory in `BUILD_ARGS`. Dependency/compiler caches can remain outside the repository. Cargo operations are offline and locked; prepare caches and commit a lockfile before running normal checks. Version synchronization runs offline Cargo check without `--locked` before the full release gate so the changed lockfile is checked and committed.
+
+`VERSION_FILE` defaults to `Cargo.toml`, `VERSION_SECTION` to `package`. An inherited workspace version requires `VERSION_SECTION = 'workspace.package'` and the root workspace manifest. Only the literal version in the selected section is edited. Existing `VERSION` and `CHANGELOG.md` metadata are updated; declare other generation in `VERSION_UPDATE`.
+
+`BUMP_STATE` defaults to `.bump_state.json` and records the release count/version before checks. Set `BENCHMARK = ['tools/benchmark', '--rust-only'].freeze` for required fifth-bump benchmarks and `DEEP_TEST = ['tools/test_deep'].freeze` for twentieth-bump integration. `nil` disables a suite explicitly. Failures preserve pending state for inspection and resume.
+
+Full review requires cargo-audit, cargo-deny, cargo-machete, and cargo-geiger. Geiger reports unsafe usage; it is not a replacement for the sizing auditor's unsafe rules. `rust-static-analysis --dups` requires an executable project `tools/check_duplicates` implementing Rust clone review; the old Go `dupl` fallback is removed. Optional `--outdated` and `--semver` require their corresponding Cargo plugins.

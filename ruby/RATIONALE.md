@@ -128,3 +128,11 @@ While reopening classes (`class String; ... end`) is a hallmark of Ruby flexibil
 | **`Hash.new([])` Mutation** | Unaware of shared reference binding | Use block constructor: `Hash.new { |h, k| h[k] = [] }`. |
 | **Global Core Monkey Patching** | Adding quick string/array convenience helpers | Encapsulate in utility modules (`StringUtils`) or use file-scoped Refinements. |
 | **String Key vs Symbol Miss** | Mixing up hash key representations | Standardize keys at parsing (`symbolize_names: true`) and use `.fetch(:key)`. |
+
+## Publication and installation evidence
+
+A successful local commit says nothing about remote publication. Checking every Git exit status, pushing a specific branch/tag atomically, and reading back their exact commits prevents scripts from printing success after rejected or misdirected pushes. A pending release record supports inspection and retry without incrementing the version again.
+
+HEAD alone does not identify checked code. Dirty sources, ignored configuration, generated version files, tool changes, and environment can alter the result. Structured verification binds the checked inputs and check level; release bumps always run full checks after version and lock changes. Checks must not rewrite those inputs.
+
+Build, gate, publication, and installation have different effects. Separating them keeps routine checking inside the repository and makes installation an explicit action against declared artifacts and destinations. Content and permission verification avoids running arbitrary installed programs merely to determine whether copying worked.

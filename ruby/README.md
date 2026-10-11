@@ -1,81 +1,65 @@
-# Ruby Engineering Standards & Tooling
+# Ruby engineering standards and tooling
 
-This directory defines the authoritative architecture, cognitive complexity boundaries, and automated tooling for Ruby projects.
+[GUIDELINES.md](GUIDELINES.md) defines method/file tiers, cognitive limits, idioms, standalone scope, and the lifecycle. [RATIONALE.md](RATIONALE.md) explains the rules. Existing architecture and sizing limits remain in force.
 
-## Directory Structure
+`bin/ruby-audit` is the standalone AST auditor. `bin/ruby-static-analysis` runs syntax, RuboCop, and scoped dependency/clone review. Keep `bin/analysis_support.rb` beside the wrapper. `ruby-install-tools --check-only` audits without creating directories and exits nonzero when required gems are missing. The installer adds Ruby-capable [Flay](https://github.com/seattlerb/flay) to the development gem list. Bootstrap or symlink installation requires separate authorization; gates never install tools.
 
-```text
-~/prog/standards/ruby/
-├── README.md                 # Quick overview & installation guide
-├── GUIDELINES.md             # Operational AI Agentic Ruby Architecture Guide
-├── RATIONALE.md              # Empirical philosophy, cognitive science & anti-patterns
-├── bin/                      # Shared standalone CLI tools
-│   ├── ruby-audit            # Sizing & cognitive complexity AST auditor
-│   ├── ruby-static-analysis  # Multi-linter orchestrator (rubocop, bundle-audit, dupl)
-│   └── ruby-install-tools    # Installs development gems and CLI tools
-└── templates/                # Reusable project workflow templates (install under tools/ without .rb)
-    ├── Makefile.snippet      # Standard Makefile quality targets
-    ├── build.rb              # tools/build: ruby -cw over bin/, lib/, tools/ (no tests, no linters)
-    ├── gate.rb               # tools/gate: build, ruby-audit, RuboCop, tests (tools/check = symlink)
-    ├── commit.rb             # tools/commit: gated commit, records .verified_head, pushes
-    ├── bump.rb               # tools/bump: semver bump, gate (or trusted .verified_head), tag, push, install
-    ├── install.rb            # tools/install: copy or --link bin/* into ~/bin (runs tools/build first)
-    └── dot_rubocop.yml       # Balanced RuboCop baseline (instantiate as .rubocop.yml; version from .ruby-version)
-```
+`templates/` contains entry points, copied helpers (`tooling.rb`, `language.rb`), `settings.rb`, `AGENTS_SNIPPET.md`, `Makefile.snippet`, and `dot_rubocop.yml`. Shared portable acceptance tests live in `../test/`.
 
-## Project Layout Convention
+## Adopt the workflow
 
-- `bin/<name>` — executables. A single-file CLI keeps its `VERSION = 'x.y.z'` constant here and exposes `--version`; `tools/bump` finds it there when there is no `lib/**/version.rb`.
-- `lib/` — library code, `test/*_test.rb` or `test/test_*.rb` — minitest suites run by `tools/gate` with `-Ilib:test`.
-- `tools/` — the lifecycle scripts below; `.ruby-version` pins the interpreter for RuboCop and mise/rbenv.
-
-## Project Bootstrap
+Copy every Ruby template, preserving `.rb` on `settings.rb`, `tooling.rb`, and `language.rb`. Entry points are installed without `.rb`:
 
 ```bash
-mkdir -p tools
-for t in build gate commit bump install; do cp ~/prog/standards/ruby/templates/$t.rb tools/$t; done
-chmod +x tools/*
-ln -sf gate tools/check                               # compatibility alias
-cp ~/prog/standards/ruby/templates/dot_rubocop.yml .rubocop.yml
-ruby -e 'puts RUBY_VERSION' > .ruby-version
-review-cycle --setup                                   # review contract, .gitignore, AGENTS.md
+rtk proxy mkdir -p tools
+for source in ~/prog/standards/ruby/templates/*.rb; do
+  name=${source##*/}
+  case "$name" in settings.rb|tooling.rb|language.rb) ;; *) name=${name%.rb} ;; esac
+  rtk proxy cp "$source" "tools/$name"
+done
+rtk proxy chmod +x tools/build tools/lint tools/test tools/gate tools/check tools/snapshot tools/commit tools/bump tools/install tools/release
 ```
 
-| Command | Role |
+Read and adapt `tools/settings.rb`. Include `templates/Makefile.snippet` in the project Makefile; targets delegate to canonical scripts. Copy [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md) into project agent instructions. The helpers are copied project assets; updating this standards repository does not upgrade existing projects automatically.
+
+| Entry point | Contract |
 |---|---|
-| `tools/build` | Syntax-validate every Ruby source. Repo-local, side-effect free. |
-| `tools/gate` | Tier 1 gate: build, `ruby-audit`, RuboCop, tests. |
-| `tools/commit -m "..."` | Gate, stage, commit, record `.verified_head`, push. |
-| `tools/bump [--minor\|--major]` | Bump VERSION, gate (skipped when `.verified_head` == HEAD and only the version changed), tag, push, install. |
-| `tools/install [--link]` | Build, then copy or symlink `bin/*` into `~/bin`. |
+| `build`, `lint`, `test` | Separate build, static feedback, and test commands. |
+| `gate`, `check` | One fast gate; `--full` adds release analysis. |
+| `snapshot [message]` | Ungated local checkpoint, bypassing commit hooks. |
+| `commit [--full] <message>` | Verified local commit; no push. |
+| `bump [major\|minor\|patch]` | Full-checked version change and verified atomic upstream publication. |
+| `bump --resume` | Resume an inspected failed release without another version change. |
+| `install [names...]` | Build and verify only declared installation targets. |
+| `release [--install] <message>` | Commit and publish a patch release; installation opt-in. |
 
-## Tooling Quick Reference
+Use `rtk proxy tools/<command>` for these entry points. Pass the commit message as one literal argument. Use scripts directly for messages containing shell metacharacters; Make interpolation is not an escaping boundary. `tools/check` delegates to `tools/gate`, and `make ci` delegates to the full gate.
 
-| Tool | Purpose | Primary Triggers |
-|---|---|---|
-| `ruby-audit [paths...]` | Audits methods against cognitive limits (depth $\le 4$, CC $\le 15$, tiered lines), file sizing (800/1100), and terminal `else`. | Pre-commit / `make audit` |
-| `ruby-static-analysis [paths...]` | Runs `ruby -cw` syntax checks, `rubocop`, `bundle-audit`, and `dupl` clone detector. | Periodic / `make review` |
-| `ruby-install-tools` | Audits and installs core development gems (`rubocop`, `ruby-lsp`, `bundler-audit`, `rainbow`, `minitest`). | Once per machine |
+## Release and installation configuration
 
-## Installation & Linking to `~/bin/`
+Releases require an attached branch, its configured remote branch upstream, and exactly one push URL. Bumps require a clean tree and strict `major.minor.patch` version. Full checks run after all version-dependent files are updated. The requested annotated tag and exact commit go to the configured upstream branch; remote SHA verification includes the peeled tag. Unrelated tags remain local. Missing analyzers, failed stages, unsupported atomic push, or remote mismatch fail the command.
 
-To make these tools globally available from anywhere in your shell and Makefiles:
+Interrupted releases retain `.git/tooling-release.json`. Inspect the failure and local state, repair the cause, then run `tools/bump --resume`. It never increments the pending version. It rejects changed committed inputs; do not bypass this by editing the verification record. Legacy `.verified_head` markers are ignored.
 
-```bash
-mkdir -p ~/bin
-ln -sf ~/prog/standards/ruby/bin/ruby-audit ~/bin/ruby-audit
-ln -sf ~/prog/standards/ruby/bin/ruby-static-analysis ~/bin/ruby-static-analysis
-ln -sf ~/prog/standards/ruby/bin/ruby-install-tools ~/bin/ruby-install-tools
-chmod +x ~/prog/standards/ruby/bin/*
-```
+`INSTALL_TARGETS = { 'artifact/path' => '/absolute/authorized/destination' }.freeze` declares installation scope. The default empty mapping disables installation. Targets must refer to declared `ARTIFACTS`, or language-discovered artifacts. Installation runs `tools/build` and verifies installed content and permissions. A declaration describes scope; user authorization and sandbox permissions still govern external writes.
 
-## Agent Configuration (`~/.gemini/AGENTS.md`)
+Set `TOOLS` overrides when an executable is not on PATH. Additional `FAST_CHECKS`, `FULL_CHECKS`, and `VERSION_UPDATE` commands are argument arrays. Freeze nested arrays as well as the outer array. Add ignored inputs to `VERIFICATION_INPUTS`; they participate in verification. Tool bootstrap remains a separate authorized step.
 
-Add the following to your global agent instructions:
+## Migration from the old templates
 
-```markdown
-## Ruby Engineering Standards
-- **Guidelines**: For any Ruby script or project, strictly adhere to the architecture, cognitive complexity limits, and idiomatic conventions defined in `~/prog/standards/ruby/GUIDELINES.md`.
-- **Rationale**: Consult `~/prog/standards/ruby/RATIONALE.md` for cognitive load foundations, block scoping rules, and anti-decomposition constraints.
-- **Validation**: Enforce compliance before committing: run `ruby -cw` and `ruby-audit` for standalone scripts (<= 150 lines); run `ruby-static-analysis` only for projects or scripts > 150 lines (see `GUIDELINES.md` §7).
-```
+Replace the entry points together with their helpers; do not mix old and new script versions. Commits are local, bumps always perform full checks, and install targets must be declared. Bumps no longer install automatically. Use positional `major`/`minor`/`patch` instead of legacy flags, and use `release --install` only for an authorized installation. Release artifacts stay inside the repository until the explicit installer copies them.
+
+The `--strict` analyzer option remains accepted, but failures now always exit nonzero. No analyzer is silently skipped or installed by a gate. Reconcile project-specific checks, version generation, and existing installation targets in settings before replacing scripts.
+## Ruby layouts, profiles, and tests
+
+Projects default to `PROFILE = :project`. Copy `templates/dot_rubocop.yml` to `.rubocop.yml` and pin the interpreter in `.ruby-version`. `SOURCE_GLOBS` covers executables, libraries, tools, tests, gemspecs, and Rakefile; adapt it for other layouts. A root executable named after the repository is also discovered. `tools/build` checks syntax with warnings enabled and treats warnings as failures. It creates no installed artifact.
+
+One application script at most 150 lines without `Gemfile.lock` may select `PROFILE = :script`; it uses syntax and strict AST audit. More application sources, larger source files, or a lockfile promote it to project checks. Copied lifecycle scripts alone do not promote it. Projects require RuboCop; full gates additionally require Flay and bundle-audit when a lockfile exists. Missing tools fail rather than reducing coverage.
+
+`TEST_GLOBS` defaults to both conventional minitest naming patterns. All matches are deduplicated and loaded in one Ruby process with `-Ilib:test`, through Bundler when a Gemfile exists. Set `TEST_COMMAND = ['bundle', 'exec', 'rspec'].freeze` or an explicit Rake command for another framework. Test failures never invoke a fallback. An empty selection is printed explicitly.
+
+`ARTIFACTS = nil` discovers executable Ruby files directly in `bin/`; specify paths for other layouts or `[]` for a pure library. `tools/install --link [names...]` supports declared development symlinks and verifies their target. An existing intended link can be updated; unrelated symlinks are rejected. The old `--dest` override is replaced by declared `INSTALL_TARGETS`.
+
+Versions are discovered from exactly one conventional `lib/**/version.rb`, root `version.rb`, or `bin/*` VERSION definition. Configure `VERSION_FILE` when ambiguous or elsewhere. Constant mode edits one literal `VERSION` assignment, leaving unrelated numeric literals alone. `VERSION_STYLE = :text` supports an explicitly selected metadata file such as `VERSION`; declare application-version generation in `VERSION_UPDATE` when required.
+
+`ruby-static-analysis` searches upward from targets for project RuboCop configuration, falling back to the standards baseline and running interpreter version. Default single-file review omits dependency and clone checks; explicit flags can request them. `--dups` uses Flay with mass threshold 50 (override with `--threshold`); clone findings, parser skips, invalid reports, and execution failures stop review. The old Go `dupl` adapter is removed.

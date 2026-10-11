@@ -121,23 +121,47 @@ When refactoring methods that exceed complexity or line limits, AI coding agents
 
 ---
 
-## 7. Quality Gates & Enforcement Tooling
+## 7. Quality gates and enforcement tooling
 
-Compliance is automated via two complementary tooling tiers tailored by target scope:
+| Scope | Required validation |
+|---|---|
+| One standalone file, at most 150 lines, no lockfile | `ruby -cw` and strict `ruby-audit`. Choose `PROFILE = :script` in copied workflow settings. |
+| One larger script | Strict `ruby-audit` and `ruby-static-analysis <file>`: syntax plus RuboCop with project configuration or the standards baseline. |
+| Multiple source files, a project, or a lockfile | Fast gate: syntax, strict AST audit, RuboCop, and tests. Full gate: also bundle-audit when a lockfile exists and Ruby AST clone review with Flay. |
 
-### Tiered Validation Gates
+Standalone mode automatically becomes project mode when application sources exceed one file or 150 lines, or `Gemfile.lock` exists. Copied lifecycle helpers do not themselves promote a small script into a project. Projects require a local `.rubocop.yml` and should pin Ruby with `.ruby-version`; use [templates/dot_rubocop.yml](templates/dot_rubocop.yml) as the starting point. Syntax warnings and errors fail the build.
 
-| Target Scope | Threshold / Trigger | Mandated Pre-Commit Gate | Rationale & Checks |
-|---|---|---|---|
-| **Standalone Scripts & CLI Utilities** | Single file, $\le 150$ lines, no `Gemfile.lock` | `ruby -cw <file>`<br>`ruby-audit <file>` | **Instant (15ms)** verification. Strictly verifies syntax, AST cognitive complexity ($\le 15$), nesting depth ($\le 4$), and fatal traps (`rescue Exception`, mutable hash defaults, core monkey patching). Bypasses repository-level CI and style nitpicks. |
-| **Large Scripts** | Single file, $> 150$ lines | `ruby-audit <file>`<br>`ruby-static-analysis <file>` | As scripts scale past 150 lines, `ruby-static-analysis` verifies structural hygiene and dead code using the standards baseline (`templates/dot_rubocop.yml`). Automatically skips `bundle-audit` and `dupl` for single files. |
-| **Projects & Repositories** | Multi-file codebases, packages with `Gemfile.lock` or local `.rubocop.yml` | `ruby-audit`<br>`ruby-static-analysis`<br>(or `make check`) | Complete multi-tool audit including syntax, style hygiene (`rubocop`), dependency CVEs (`bundle-audit`), code clone detection (`dupl`), and unit test suites (`rake test` / `minitest`). |
+`ruby-audit` uses RubyVM's AST to enforce the existing method/file tiers, nesting depth (at most 4), cognitive complexity (at most 15), idioms, and agent trap rules. These limits remain unchanged.
 
-### Tooling Details
+`ruby-static-analysis` discovers Ruby extensions and extensionless Ruby executables. By default it runs syntax and RuboCop; directory/multiple-file reviews also run Flay and bundle-audit when a lockfile exists. Single-file reviews omit repository clone/dependency checks unless explicitly selected. Explicit `--syntax`, `--rubocop`, `--vuln`, or `--dups` flags select only those checks. Missing required tools and failed checks always exit nonzero; `--strict` is accepted for compatibility.
 
-- **`ruby-audit`** (Fast AST Gate):
-  - Written with `RubyVM::AbstractSyntaxTree`; runs in ~10ms with zero gem dependencies.
-  - Enforces nesting depth ($\le 4$), cognitive complexity ($\le 15$), tiered method lines, and catches fatal runtime traps.
-- **`ruby-static-analysis`** (Multi-Linter Orchestrator):
-  - Automatically searches upward for a project `.rubocop.yml`; if absent, falls back to the balanced standards baseline ([`templates/dot_rubocop.yml`](templates/dot_rubocop.yml)).
-  - Intelligently scopes executions: skips repository-level checks (`bundle-audit`, `dupl`) when invoked on single files.
+The standalone wrapper searches upward from target files for `.rubocop.yml`; different project configurations require separate reviews. Without project configuration it uses the standards baseline and current interpreter version. Flay's `--threshold` sets its mass threshold (default 50); any reported clone score fails. Parser skips, stderr diagnostics, or an invalid report also fail. See [Flay](https://github.com/seattlerb/flay) for its Ruby AST comparison model. The previous Go-specific `dupl` adapter is removed.
+
+Tests load all discovered minitest files once in one process; failures propagate directly. Use an explicit `TEST_COMMAND` array for RSpec, Rake, or other frameworks. An empty test selection is reported. No shell fallback substitutes a different test command after a failure.
+
+## Repository lifecycle
+
+Copy the templates into the project; the helpers load project-local settings and never load a live standards checkout. Configure `tools/settings.rb` before use. Make targets delegate to the same executable scripts.
+
+| Command | Behavior |
+|---|---|
+| `tools/build` | Produce or validate repository artifacts; no tests, linting, installation, or publication. |
+| `tools/lint` | Required fast analyzers; missing executables and failed subprocesses stop the command. |
+| `tools/test` | Run the configured language test suite. |
+| `tools/gate`, `tools/check` | Identical fast gate, with one build and one test run. Add `--full` for deep review. |
+| `tools/snapshot [message]` | Ungated local checkpoint, bypassing commit hooks; use only when a checkpoint is intended. |
+| `tools/commit [--full] <message>` | Gate, stage, and commit locally. A structured verification record can reuse checks only for matching HEAD, inputs, tools, environment, and check level. |
+| `tools/bump [major\|minor\|patch]` | Require a clean tree and configured branch upstream; update version, run the full gate, commit, tag, and push. Default is patch. |
+| `tools/bump --resume` | Resume an inspected interrupted release at its pending version, never bumping again. |
+| `tools/install [names...]` | Build, then install only selected declared artifacts to declared absolute destinations; verify bytes and executable permissions. |
+| `tools/release [--install] <message>` | Local gated commit followed by full-checked bump and verified publication. Installation requires `--install`. |
+
+Bumps never trust the old `.verified_head` marker or assume a version-only edit is safe. Version changes, lock synchronization, and version-generation commands happen before checks. Publication pushes only the release commit to its configured upstream branch and the requested annotated tag; it verifies the exact remote branch and peeled tag commit. No unrelated tags are pushed. The remote must support atomic pushes. `RELEASE_TAG = false` explicitly disables tagging.
+
+An interrupted bump leaves files, commits, tags, and `.git/tooling-release.json` available for inspection. Repair the cause and use `--resume`; a committed release rejects changed HEAD, worktree, or checked inputs. If installation fails after publication, the command reports that publication succeeded and installation failed. It does not claim the release was rolled back.
+
+Installation is disabled until `INSTALL_TARGETS` declares artifact-to-destination mappings. Libraries can use `ARTIFACTS = []`. Undeclared names, escaping artifact paths, and unrelated destination symlinks fail. Checking or committing never installs. Tool bootstrap is a separate authorized action; missing analyzers never trigger installation.
+
+`TOOLS` supplies explicit executable overrides. `FAST_CHECKS`, `FULL_CHECKS`, and `VERSION_UPDATE` contain argument arrays, not shell strings. Declare ignored generated/configuration inputs in `VERIFICATION_INPUTS`; verification includes tracked and unignored files, copied tooling, required language inputs, tool identities, and relevant environment. Compiler and dependency caches may be external; project artifacts remain inside the repository.
+
+Run routine checks for authorized work and reuse authorization given in the session. Command approval permits execution; it does not authorize unrelated publication, installation, or filesystem writes. Keep sandboxing and manual approval review enabled. Read [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md) for exact command forms.

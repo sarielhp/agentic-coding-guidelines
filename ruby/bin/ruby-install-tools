@@ -5,8 +5,8 @@
 # ~/prog/standards/ruby/bin/ruby-install-tools
 #
 # Environment auditor and installer for Ruby development tooling:
-# - Ruby Gems: rubocop, ruby-lsp, bundler-audit, rainbow, minitest
-# - System & CLI Tools: ast-grep (sg), repomix, rtk, dupl
+# - Ruby Gems: rubocop, ruby-lsp, bundler-audit, flay, rainbow, minitest
+# - System & CLI Tools: ast-grep (sg), repomix, rtk
 # - PATH validation for user gem and local binary directories
 # ==============================================================================
 
@@ -51,7 +51,7 @@ module RubyDevInstaller
     false
   end
 
-  def self.run_cmd(cmd_array, verbose: false)
+  def self.run_cmd?(cmd_array, verbose: false)
     puts "      Running: #{cmd_array.join(' ')}" if verbose
     stdout_stderr, status = Open3.capture2e(*cmd_array)
     puts stdout_stderr if verbose && !stdout_stderr.empty?
@@ -90,6 +90,7 @@ module RubyDevInstaller
     { name: 'rubocop', binary: 'rubocop', desc: 'Static code analyzer and formatter' },
     { name: 'ruby-lsp', binary: 'ruby-lsp', desc: 'Shopify Ruby Language Server Protocol' },
     { name: 'bundler-audit', binary: 'bundle-audit', desc: 'Dependency vulnerability security auditor' },
+    { name: 'flay', binary: 'flay', desc: 'Ruby AST clone detector' },
     { name: 'rainbow', binary: nil, desc: 'Terminal ANSI color formatting library' },
     { name: 'minitest', binary: nil, desc: 'Fast, lightweight testing framework' }
   ].freeze
@@ -97,15 +98,14 @@ module RubyDevInstaller
   CLI_TOOLS = [
     { cmd: 'sg', name: 'ast-grep', desc: 'AST code search and structural refactoring' },
     { cmd: 'repomix', name: 'repomix', desc: 'Repository context bundler for LLMs' },
-    { cmd: 'rtk', name: 'rtk', desc: 'CLI token compression proxy' },
-    { cmd: 'dupl', name: 'dupl', desc: 'Code clone and duplicate block detector' }
+    { cmd: 'rtk', name: 'rtk', desc: 'CLI token compression proxy' }
   ].freeze
 
-  def self.verify_and_install_gems(check_only: false, verbose: false)
+  def self.verify_and_install_gems?(check_only: false, verbose: false)
     puts "#{BOLD}==> 2. Checking Core Ruby Gems#{RESET}"
-    FileUtils.mkdir_p(user_gem_bindir)
+    FileUtils.mkdir_p(user_gem_bindir) unless check_only
 
-    GEM_SPECS.each do |spec|
+    results = GEM_SPECS.map do |spec|
       name = spec[:name]
       bin = spec[:binary]
       desc = spec[:desc]
@@ -115,26 +115,30 @@ module RubyDevInstaller
 
       if gem_ok && bin_ok
         puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        true
       elsif check_only
         puts "  [#{YELLOW}MISSING#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        false
       else
         install_gem(name, bin, desc, verbose: verbose)
       end
     end
     puts ''
+    results.all?
   end
 
   def self.install_gem(name, bin, desc, verbose: false)
     print "  [..] Installing #{BOLD}#{name}#{RESET} (#{desc})... "
     cmd = ['gem', 'install', '--user-install', '--bindir', user_gem_bindir, name]
-    success = run_cmd(cmd, verbose: verbose)
+    success = run_cmd?(cmd, verbose: verbose)
 
     if success && bin
       binstub_path = File.join(user_gem_bindir, bin)
       unless File.exist?(binstub_path)
         pristine_cmd = ['gem', 'pristine', name, '--bindir', user_gem_bindir]
-        run_cmd(pristine_cmd, verbose: verbose)
+        success = run_cmd?(pristine_cmd, verbose: verbose)
       end
+      success &&= File.file?(binstub_path) && File.executable?(binstub_path)
     end
 
     if success
@@ -142,6 +146,7 @@ module RubyDevInstaller
     else
       puts "\r  [#{RED}FAILED#{RESET}] #{BOLD}#{name}#{RESET}"
     end
+    success
   end
 
   def self.verify_cli_tools
@@ -173,10 +178,10 @@ module RubyDevInstaller
 
     puts "\e[1;36m=== Ruby Development Environment & Tooling Auditor ===\e[0m\n\n"
     check_path_environment
-    verify_and_install_gems(check_only: check_only, verbose: verbose)
+    complete = verify_and_install_gems?(check_only: check_only, verbose: verbose)
     verify_cli_tools
-    puts "\e[32m✔ Environment audit complete.\e[0m\n\n"
-    0
+    puts(complete ? 'Environment audit complete.' : 'Required gems missing or installation failed.')
+    complete ? 0 : 1
   end
 end
 
