@@ -1,7 +1,9 @@
 {
-  "target": "src",
+  "target": ".",
   "gate_cmd": "tools/gate",
   "build_cmd": "tools/build",
-  "guidelines": "Adhere strictly to project architectural guidelines and cognitive complexity limits (depth <= 4, branches <= 15, tiered function sizing).",
-  "max_diff_lines": 800
+  "gate_includes_build": true,
+  "guidelines": "Follow project AGENTS.md and the applicable language standards: nesting depth <= 4; Go/Rust decision branches <= 15; Ruby cognitive complexity <= 15; language-specific function/method and file tiers.",
+  "max_diff_lines": 800,
+  "push": false
 }

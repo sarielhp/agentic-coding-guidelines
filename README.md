@@ -121,18 +121,20 @@ To bring any new or existing repository under these standards in 3 deterministic
 Follow the language-specific bootstrap instructions in [Go](go/README.md), [Rust](rust/README.md), or [Ruby](ruby/README.md). Copy the entry points together with their helpers and settings; adapt the project artifact layout, checks, version source, and installation destinations. Include that language's Makefile and agent snippets. Existing projects require explicit migration; these templates do not update them automatically.
 
 ### Step 2: Bootstrap the Review & Quality Contract
-Run the idempotent onboarding command from the root of your project:
+
+After adopting the complete language tooling, create or reconcile the project contract using [workflow/templates/review_cycle.json](workflow/templates/review_cycle.json). Its repository-wide target supports different layouts and `push: false` keeps review commits local. Narrow the target and adapt the guidelines for the project. Preserve existing settings rather than overwriting an existing configuration.
+
+For requested onboarding, run from the project root:
 
 ```bash
-review-cycle --setup
+rtk proxy review-cycle --setup
+rtk proxy review-cycle --doctor
+rtk proxy tools/gate
 ```
 
-This automatically:
-- Validates environment prerequisites (`--doctor`: Ruby $\ge 3.0$, Git, `bws`, `agy-run-wild`, `audit`).
-- Generates `tools/review_cycle.json` (`tools/gate`, `tools/build`, guidelines, and source targets). The auditor is `review-audit` on PATH; nothing is linked into the project.
-- Checks the `tools/build` contract and, for Ruby projects, creates `.ruby-version` if missing.
-- Enforces Git hygiene by appending `reviews/archive/` and `reviews/logs/` to `.gitignore`.
-- Appends the standard review cycle specification block to `AGENTS.md`.
+Setup requires executable `tools/build` and a resolvable gate before configuring local bws profiles/tool mounts. It checks host and sandbox prerequisites, creates missing configuration with local commits by default, adds ignore entries, and refreshes the recognized agent review section. Ruby projects receive `.ruby-version` if absent. Install dependencies separately. Existing configuration and unrelated agent sections are preserved; inspect explicit `push: true` settings. Setup does not copy lifecycle helpers or grant bws trust.
+
+Setup uses [workflow/templates/AGENTS_SNIPPET.md](workflow/templates/AGENTS_SNIPPET.md), with an embedded fallback when unavailable. Reconcile custom review sections manually when setup preserves them. See [workflow/README.md](workflow/README.md) for strict configuration validation, build ownership, differential verification, dry-run effects, publication checks, and remaining boundaries. Use `rtk proxy review-cycle --no-push` to override a push-enabled configuration.
 
 ### Step 3: Repository lifecycle
 
@@ -151,7 +153,7 @@ All three languages use the same separation of build, checking, local commits, p
 | `tools/release [--install] <message>` | Commit and publish; installation only with `--install`. |
 | `review-cycle` | Separate remediation engine; uses the project's build/gate contract. |
 
-Missing tools and failed commands stop the workflow. Bootstrap remains separate. Bumps check changed versions fully and verify remote refs. Compiler/dependency caches may be external; repository artifacts stay inside the repository. Reuse session authorization while keeping sandboxing and manual approval review enabled.
+The language lifecycle scripts stop on missing required tools and failed commands. The separate review engine checks verification and Git failures, defaults to local commits, and documents its remaining boundaries in [workflow/README.md](workflow/README.md). Bootstrap remains separate. Bumps check changed versions fully and verify remote refs. Compiler/dependency caches may be external; repository artifacts stay inside the repository. Reuse session authorization while keeping sandboxing and manual approval review enabled.
 
 #### The `tools/build` contract
 
@@ -162,7 +164,7 @@ Every repository carries a `tools/build`, even when it is almost empty, so no to
 - It runs **no tests and no linters**. Build answers "does the artifact exist and parse"; `tools/gate` answers "is it good". A build that grows into a second gate makes the review cycle pay twice.
 - Go and Rust gates call build once after successful checks and tests; Ruby checks syntax once before its analyzers and tests. Keep build validation defined in the build entry point.
 
-`review-cycle --setup` warns when `tools/build` is missing and never falls back to `tools/install`.
+`review-cycle --setup` fails when executable `tools/build` is missing and never falls back to `tools/install`.
 
 ---
 
@@ -190,7 +192,7 @@ Add the directives to your AI prompt or system instructions:
 
 ## Autonomous Review & Remediation Loop
 - **Engine**: Execute closed-loop review and remediation using `review-cycle` (installed from `~/prog/26/ruby/review_cycle` via its `tools/install --link review-cycle`).
-- **Lenses**: Audit across the 6 specialized domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`) via `audit`.
+- **Lenses**: Audit across the 6 specialized domain lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`) via `review-audit`.
 - **Sandbox Isolation**: Remediation runs inside isolated [bws](https://github.com/sarielhp/bws) sandboxes with automated git squash-merge and rollback guards.
 - **Contract**: Define project gates, build commands, and file limits in `review_cycle.json` (or `tools/review_cycle.json`).
 ```
@@ -236,7 +238,7 @@ rust-static-analysis
 # Autonomous Review & Remediation Loop
 review-cycle --doctor         # Validate runtime dependencies (Ruby, git, bws, agy-run-wild, audit)
 review-cycle                  # Run a single review and remediation cycle
-review-cycle --loop           # Continuously audit and heal until all profiles pass cleanly
+review-cycle --loop           # Run bounded review rounds (seven cycles by default)
 review-cycle -p security      # Target a specific lens profile directly
 ```
 
