@@ -1,51 +1,33 @@
-# Standard Go Quality Targets (include or adapt in project Makefile)
-
-.PHONY: all build gate check ci lint audit review static-analysis test commit bump clean
-
+# Copy or include; use tools/commit directly for messages with shell metacharacters.
+.PHONY: all build gate check ci lint snapshot commit bump install release test audit review static-analysis clean
 all: build
-
-# Build via tools/build (go build ./... and bin/<project>)
 build:
 	tools/build
-
-# Fast everyday gate: format, vet, baseline staticcheck, audit, test, build
 gate:
 	tools/gate
-
-# Compatibility alias (tools/check is a symlink to tools/gate)
-check: gate
-
-ci: gate
-
-
-
-# Sizing & cognitive complexity audit
-audit:
-	go-audit
-
-# Fast static linting
+check:
+	tools/check
+ci:
+	tools/gate --full
 lint:
-	go vet ./...
-	staticcheck ./...
-	go-audit --quiet
-
-# Deep multi-tool static analysis
+	tools/lint
+snapshot:
+	tools/snapshot $(ARGS)
+commit:
+	tools/commit "$(msg)"
+bump:
+	tools/bump
+install:
+	tools/install
+release:
+	tools/release $(ARGS)
+test:
+	go test -timeout 180s ./...
+audit:
+	go-audit --strict --quiet .
 review: static-analysis
 static-analysis:
 	go-static-analysis
-
-# Offline unit tests
-test:
-	go test -v ./...
-
-# Gated commit (runs check first, stages, commits, records .verified_head)
-commit:
-	tools/commit "$(msg)"
-
-# Increment patch version, verify, commit, push, and install
-bump:
-	tools/bump
-
 clean:
 	go clean
 	rm -f $(BIN_NAME)

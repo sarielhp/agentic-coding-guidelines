@@ -121,12 +121,45 @@ Every extracted helper must have a **single, cohesive, domain-named responsibili
 Static analysis tools are not all equal in cost or intent:
 
 ### Tier 1: Continuous & Pre-Commit (`go-audit`, `go vet`, `staticcheck`)
-- Must run in $\le 2$ seconds.
+- Keep static feedback fast; actual runtime depends on repository size and caches.
 - Detects objective compiler violations, formatting drift, and sizing/complexity boundaries.
 - Designed to run on every file save and every working git commit.
 
 ### Tier 2: Deep Periodic Review (`go-static-analysis`)
 - Deploys heavy AST heuristic engines: `gocritic`, `revive`, `shadow`, `dupl`, and `govulncheck`.
-- Runs in 4–8 seconds.
+- Runtime depends on repository size, caches, and vulnerability database access.
 - These tools produce qualitative and heuristic findings. Some clone groups (`dupl`) in CLI options or table declarations are intentional; others point to real copy-paste bugs.
 - Running them periodically ensures the codebase stays free of subtle architectural debt without bogging down rapid commit cycles.
+
+## 7. Why the Repository Interface Separates Operations
+
+`tools/build` answers whether the repository's artifacts can be produced.
+`tools/lint` offers static feedback. The fast gate adds formatting, module
+tidiness, tests, and a final build; the full gate adds race, vulnerability, and
+deep review checks. A final build uses the checked inputs and supports both
+applications and libraries. Tests prevent a useful gate from promising a fixed
+sub-second duration. Gate/check share one implementation so callers, including
+review-cycle, do not pay for duplicate checking.
+
+Commits are local, bumps publish to a verified upstream, and installations write
+only declared authorized targets. Making install opt-in prevents a publication
+workflow from silently changing the user's running software. Literal argument
+arrays preserve commit messages and branch names without shell interpretation.
+Missing analyzers and crashed subprocesses are execution failures, not evidence
+that there are no findings. Baseline multisets retain duplicate counts; reviewed
+debt cannot absorb a second copy of the same defect.
+
+A bare HEAD SHA says nothing about gate level or current working files. The
+verification record therefore binds its level to HEAD, file content and modes,
+tool settings, Go configuration, and analyzer identities. Source edits and
+commit-hook mutations invalidate that evidence. Embedded versions use a full
+gate after version changes; metadata-only reuse requires an actual embedding
+check and still rebuilds the artifact. A filename allowlist cannot establish
+that changed Go code is safe merely because it contains a version literal.
+
+Release failures retain local evidence and a pending-release record. Resuming
+the same commit avoids generating another version solely because a remote was
+temporarily unavailable. Querying the exact destination ref distinguishes a
+successful push command from the intended commit being present there. Tests
+exercise these decisions in temporary repositories and local bare remotes;
+they never need the user's installation directory or real publication remotes.

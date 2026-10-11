@@ -57,12 +57,20 @@ agentic-coding-guidelines/
 │   │   ├── go-audit          # Sizing & cognitive complexity auditor
 │   │   ├── go-static-analysis# Multi-linter orchestrator (gocritic, shadow, revive, dupl, govulncheck)
 │   │   └── go-install-tools  # Automated linter installer into ~/.go/bin/
+│   ├── test/                 # Portable tooling acceptance tests and real Go fixtures
 │   └── templates/            # Reusable project workflow templates
-│       ├── Makefile.snippet  # Standard Makefile targets
-│       ├── build.rb          # tools/build: artifact only, repo-local, no tests/linters
-│       ├── gate.rb           # tools/gate: Tier 1 quality gate (tools/check = symlink)
-│       ├── commit.rb         # Gated commit with .verified_head
-│       └── bump.rb           # Version bump & install script
+│       ├── Makefile.snippet  # Delegates to canonical Go scripts
+│       ├── AGENTS_SNIPPET.md # Exact command forms and authorization boundaries
+│       ├── settings.rb      # Project artifact, check, version, and install choices
+│       ├── tooling.rb       # Copied shared implementation
+│       ├── build.rb         # Repository artifacts for apps, libraries, cmd layouts
+│       ├── gate.rb/check.rb # One fast/full gate implementation
+│       ├── lint.rb          # Fast static checks
+│       ├── snapshot.rb      # Ungated local checkpoint
+│       ├── commit.rb        # Gated local commit and structured verification
+│       ├── bump.rb          # Full-checked patch bump and verified upstream push
+│       ├── install.rb       # Declared installation and content verification
+│       └── release.rb       # Commit, bump, push; installation opt-in
 ├── rust/
 │   ├── README.md             # Rust quick reference & CLI usage
 │   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
@@ -110,9 +118,15 @@ To bring any new or existing repository under these standards in 3 deterministic
 ### Step 1: Adopt Language Workflow Templates
 Copy the standard quality gates, bumper, and guarded commit harness into your project's `tools/` directory:
 
+For **Go**, follow [the Go onboarding guide](go/README.md#adopt-the-repository-interface):
+copy build/gate/check/lint/snapshot/commit/bump/install/release under their canonical
+names, plus `settings.rb` and `tooling.rb` unchanged. Adapt settings and ignore
+declared build artifacts. The following existing copy procedure applies to
+**Ruby and Rust**, whose workflow behavior is unchanged:
+
 ```bash
 mkdir -p tools
-LANG=ruby   # or go / rust
+LANG=ruby   # or rust; Go additionally needs its copied helper/settings files
 
 # Lifecycle scripts, installed under their canonical names (no .rb extension):
 for t in build gate commit bump install; do
@@ -140,14 +154,22 @@ This automatically:
 - Enforces Git hygiene by appending `reviews/archive/` and `reviews/logs/` to `.gitignore`.
 - Appends the standard review cycle specification block to `AGENTS.md`.
 
-### Step 3: The 4-Command Everyday Lifecycle
-Once onboarded, maintainers and AI agents operate through 4 canonical commands:
+### Step 3: Repository Lifecycle
+
+Go's canonical interface is documented in
+[GUIDELINES §8](go/GUIDELINES.md#8-repository-tooling-interface): build, gate/check,
+lint, snapshot, commit, bump, install, and release. `tools/commit <message>` is
+local and does not push. Bump validates and pushes to a verified upstream;
+installation is separate or explicitly selected with `tools/release --install`.
+Fast verification cannot replace full release checking. Gates finish with a build.
+
+The existing **Ruby/Rust** lifecycle below retains its language-specific behavior:
 
 | Command | Lifecycle Role | Frequency | Description |
 | :--- | :--- | :--- | :--- |
 | **`tools/build`** | Build Contract | Called by gate, install, review-cycle | Produces or validates the artifact inside the repo. Never writes outside it, never runs tests or linters. May be trivial (a syntax check for Ruby). |
-| **`tools/gate`** | Fast Quality Gate | Every edit / pre-commit | Sub-second Tier 1 gate: unit tests, formatting, linter, cognitive complexity limits. |
-| **`tools/commit -m "..."`** | Guarded Git Commit | Multiple times daily | Runs `tools/gate`, stages changes, commits, records `.verified_head`, and pushes to remote. |
+| **`tools/gate`** | Fast Quality Gate | Every edit / pre-commit | Tier 1 gate: unit tests, formatting, linter, cognitive complexity limits; runtime depends on the project. |
+| **`tools/commit <message>`** | Guarded Git Commit | Multiple times daily | Runs `tools/gate`, stages changes, commits, and records `.verified_head`; consult each language template for publication behavior. |
 | **`tools/bump`** | Milestone Release | Version milestones | Bumps the version, runs `tools/gate` unless `.verified_head` matches HEAD and only the version changed, tags, pushes, and runs `tools/install`. (Rust adds Tier 2/3 milestone checks.) |
 | **`tools/install`** | Install | After a release | Runs `tools/build`, then copies or symlinks the artifact into `~/bin`. The only script allowed to write outside the repository. |
 | **`review-cycle`** | Autonomous Remediation | Periodic / on-demand | 5-phase closed-loop engine: 6-lens audit $\to$ `bws` sandbox fix $\to$ gate verification $\to$ auto-commit. Separate program (`~/prog/26/ruby/review_cycle`); this repo defines only its contract. |
@@ -157,9 +179,9 @@ Once onboarded, maintainers and AI agents operate through 4 canonical commands:
 Every repository carries a `tools/build`, even when it is almost empty, so no tool ever has to guess a build command:
 
 - It produces or validates the artifact **inside the repository** and exits non-zero on failure (`cargo build --release`, `go build ./...`, `ruby -cw` over the sources).
-- It **never writes outside the repository**. Installing is `tools/install`'s job, and `tools/install` calls `tools/build` first.
+- Repository artifacts stay inside the repository. Compiler/module caches may be external. Installing is `tools/install`'s job, and `tools/install` calls `tools/build` first.
 - It runs **no tests and no linters**. Build answers "does the artifact exist and parse"; `tools/gate` answers "is it good". A build that grows into a second gate makes the review cycle pay twice.
-- `tools/gate` calls it as its first step, so syntax validation is defined exactly once.
+- Go's gate calls build once after successful checks and tests. Existing Ruby/Rust gates retain their language-specific ordering. Keep build validation defined in the build entry point.
 
 `review-cycle --setup` warns when `tools/build` is missing and never falls back to `tools/install`.
 

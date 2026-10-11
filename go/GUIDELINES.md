@@ -86,3 +86,98 @@ Compliance is automated via two complementary tooling tiers:
   - `revive`: Go idioms, style hygiene, unused parameters, naming conventions.
   - `govulncheck`: Call-graph dependency CVE vulnerability checks.
   - `dupl`: Structural AST clone and duplicate code detection.
+
+## 8. Repository Tooling Interface
+
+Every Go repository supplies a repository-local `tools/build` and a quality gate.
+The copied [templates](templates/) supply the following common interface:
+
+| Command | Contract |
+|---|---|
+| `tools/build` | Produce or validate repository-local artifacts; no tests, linters, installation, or Git mutations |
+| `tools/gate` / `tools/check` | Equivalent entry points to one quality-gate implementation; `--full` selects release checking |
+| `tools/lint` | Fast static checks, without tests, artifact builds, or Git mutations |
+| `tools/snapshot [message]` | Local checkpoint commit without a gate or push |
+| `tools/commit [--full] <message>` | Gate, stage, commit, and record verification; no push |
+| `tools/bump [--resume]` | Validate, bump patch version, commit, explicitly push to the configured upstream, and verify remote SHA; no installation |
+| `tools/install` | Build, install only to declared authorized targets, and compare installed contents with the built artifact |
+| `tools/release [--install] <message>` | Coordinate gated commit, full release checking, bump, verified push, and opt-in installation; stop at the first failure |
+
+Make targets delegate to these scripts. Keep `tools/gate` and `tools/build`
+compatible with the review-cycle contract; `tools/check` loads the same gate.
+Libraries need build and quality checks, but need not invent installation or
+versioned releases. Unsupported commands fail clearly.
+
+### Project Settings and Artifact Containment
+
+Copy `settings.rb` and `tooling.rb` beside the entry points; they have no runtime
+dependency on this standards checkout. Adapt the explicit settings for build
+packages, artifact-to-package mappings, CLI layouts, installation targets,
+version storage, version update commands, and additional checks. The example
+detects a root main package and writes `bin/<project>`; libraries validate
+`./...`; `cmd/` projects declare their entry points. Root binaries are supported.
+
+Validate every artifact's path and existing symlink ancestors **before any
+build writes**. Repository artifacts stay inside the repository; Go's ordinary
+module and compiler caches can live outside it. Ignore built artifacts in Git.
+Never overwrite source files, control files, or an undeclared installation target.
+
+Resolve executable paths using explicit project overrides, configured GOBIN and
+GOPATH/bin locations, PATH, and the customary `~/.go/bin` and `~/go/bin` fallbacks.
+Missing required tools fail; bootstrap installation is a separately authorized
+operation. Use argument arrays for subprocesses and check every exit status.
+
+### Fast and Full Gates
+
+The fast gate checks formatting without modifying sources, module tidiness,
+vet, staticcheck, strict cognitive audit, project checks, and tests, then calls
+`tools/build` once. `tools/lint` owns vet, staticcheck, and the cognitive audit.
+The full gate additionally runs race tests, vulnerability checking, deep AST
+review (gocritic, shadow, revive, dupl), and configured full project checks,
+before the final build. Runtime depends on the project and tool caches.
+
+Baselines are explicit reviewed records, never automatically enlarged. Compare
+finding **counts**, so a repeated finding cannot disappear through set
+deduplication. Analyzer execution failures, missing tools, or malformed reports
+are failures even when a baseline exists. Staticcheck baselines contain exact
+JSON diagnostic records; go-audit baselines contain exact ANSI-free `[FAIL]`
+lines. Hard audit findings are enforced using `--strict`. Soft warnings remain
+advisory. Changes to analyzer formats require an explicit adapter review.
+
+### Verification and Releases
+
+Verification records live in Git metadata, separate from staged project files.
+They include the checked HEAD, gate level, and a digest of tracked and unignored
+untracked file contents and modes, copied tools (including ignored tools), Go
+configuration, and analyzer executable identities. A fast record, old SHA-only
+marker, changed source, changed tool settings, or changed required input cannot
+substitute for full verification. Commit hooks that alter checked inputs prevent
+recording verification. Declare additional ignored/generated inputs in the
+digest when adapting a project; keep environment-sensitive checks explicit.
+
+The default embedded-version mode changes version metadata and runs the full
+gate against that version before committing. Version update commands run before
+the gate and cannot exempt changed source from checking. For metadata-only
+versions, full verification can be reused only for an otherwise identical HEAD
+and inputs, with VERSION excluded from the digest and `go list` confirming that
+it is not embedded in a Go package. Even then, build the versioned artifact.
+The release orchestrator runs the fast commit gate followed by one full bump
+gate. It does not claim a fast commit is release-verified.
+
+Bump validates semantic version syntax, clean working tree, attached branch,
+and upstream remote/ref before modifying files. It pushes the release commit
+explicitly to that ref without force, then queries the same remote/ref and
+compares its SHA. Failures preserve local files and commits. A pending-release
+record prevents a second bump. Resolve the upstream's single push URL and use
+that URL for both push and verification. After a failed push or remote query, inspect
+local state and use `tools/bump --resume` to retry the same commit. Earlier
+check/commit failures require inspection and repair; resume can full-check and
+commit the pending version when the original HEAD and pending version still match.
+Never blindly repeat bump.
+Do not pull, merge, rebase, or synchronize unrelated refs automatically.
+
+Installation compares contents and preserves executable mode; it does not commit,
+push, change completions, or remove legacy software. A successful verified push
+followed by failed installation remains a published release; report the failed
+installation separately. Tool execution approval and task authorization are
+distinct: templates do not edit agent approval rules or sandbox writable roots.
