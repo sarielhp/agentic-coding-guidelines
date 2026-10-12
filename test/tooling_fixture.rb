@@ -78,7 +78,7 @@ class ToolingFixture < Minitest::Test
   end
 
   def fixture_environment
-    %w[git cargo rustc rust-audit cargo-audit cargo-deny cargo-machete cargo-geiger ruby-audit rubocop bundle-audit flay
+    %w[git cargo rustc rust-audit cargo-audit cargo-deny cargo-machete ruby-audit rubocop bundle-audit flay
        bundle].each do |tool|
       File.write(File.join(@bin, tool), "#!#{RbConfig.ruby}\n#{MOCK}")
       File.chmod(0o755, File.join(@bin, tool))

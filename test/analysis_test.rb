@@ -30,6 +30,22 @@ class RustAnalyzerTest < ToolingFixture
   LANGUAGE = 'rust'
   include AnalyzerContract
 
+  def test_default_checks_require_only_supported_analyzers
+    _, err, status = analyze
+    assert status.success?, err
+    assert_equal %w[cargo cargo-audit cargo-deny cargo-machete], trace.map(&:first)
+  end
+
+  def test_geiger_is_not_a_supported_check_or_bootstrap_tool
+    _, err, status = analyze('--geiger')
+    refute status.success?
+    assert_match(/invalid option/, err)
+    bootstrap = File.join(ROOT, 'rust/bin/rust-install-tools')
+    out, errors, result = Open3.capture3(@env, bootstrap, '--list', chdir: @repo)
+    assert result.success?, errors
+    refute_includes out, 'cargo-geiger'
+  end
+
   def test_duplicate_provider_is_required_and_exit_status_is_checked
     _, err, status = analyze('--dups')
     refute status.success?

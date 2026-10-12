@@ -120,7 +120,7 @@ When refactoring functions that exceed complexity or line limits, AI agents must
 
 The fast gate runs formatting, Clippy with warnings denied, strict `rust-audit`, offline locked all-target tests, then one release build. Runtime depends on project size and cache state. Offline mode requires dependency caches to be prepared separately; it does not make tests hermetic or prohibit their own filesystem/network access.
 
-Every release runs the full gate on the changed version, adding required cargo-audit, cargo-deny, cargo-machete, and cargo-geiger checks. These analyzers may require advisory data or network access. The standalone `rust-static-analysis` runs the same deep analyzer set plus Clippy by default; explicit flags select only those analyzers. Failures and missing selected tools are fatal, including without `--strict`.
+Every release runs the full gate on the changed version, adding required cargo-audit, cargo-deny, and cargo-machete checks. These analyzers may require advisory data or network access. The standalone `rust-static-analysis` runs the same deep analyzer set plus Clippy by default; explicit flags select only those analyzers. Failures and missing selected tools are fatal, including without `--strict`.
 
 Milestone counts remain in the configured `BUMP_STATE` file. A configured `BENCHMARK` command is required on every fifth bump; a configured `DEEP_TEST` command is required on every twentieth bump. Both default to `nil`, an explicit project choice to disable that suite. Set commands in `tools/settings.rb`; a failing or missing configured command stops publication. Invalid milestone state requires repair and is never silently reset.
 

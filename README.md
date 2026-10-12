@@ -77,7 +77,7 @@ agentic-coding-guidelines/
 │   ├── RATIONALE.md          # Deep-dive philosophy, borrowck anti-patterns & divergences
 │   ├── bin/                  # Standalone verification CLI tools
 │   │   ├── rust-audit        # Sizing, cognitive complexity & unwrap/safety auditor
-│   │   ├── rust-static-analysis # Multi-linter orchestrator (clippy, audit, deny, machete, geiger)
+│   │   ├── rust-static-analysis # Multi-linter orchestrator (clippy, audit, deny, machete)
 │   │   ├── analysis_support.rb # Required wrapper support
 │   │   └── rust-install-tools# Automated cargo tools installer into ~/.cargo/bin/
 │   └── templates/            # Reusable project workflow templates
@@ -183,7 +183,7 @@ Add the directives to your AI prompt or system instructions:
 ## Rust Engineering Standards
 - **Guidelines**: For any Rust project, strictly adhere to the architecture, cognitive complexity limits, `let-else` guard idioms, and anti-clone rules defined in `~/prog/standards/rust/GUIDELINES.md`.
 - **Rationale**: Consult `~/prog/standards/rust/RATIONALE.md` for the empirical reasoning, borrow-checker anti-decomposition constraints, and 3-tier milestone strategy.
-- **Validation**: Enforce compliance before committing using `rust-audit` (sizing, complexity & unwrap/unsafe audit) and `rust-static-analysis` (clippy, CVEs, supply-chain & unsafe review).
+- **Validation**: Enforce compliance before committing using `rust-audit` (sizing, complexity & unwrap/unsafe audit) and `rust-static-analysis` (clippy, CVEs & supply-chain review).
 
 ## Ruby Engineering Standards
 - **Guidelines**: Follow `~/prog/standards/ruby/GUIDELINES.md` for method/file tiers, cognitive limits, idioms, and standalone scope.

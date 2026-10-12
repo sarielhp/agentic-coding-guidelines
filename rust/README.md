@@ -2,7 +2,7 @@
 
 [GUIDELINES.md](GUIDELINES.md) defines architecture, cognitive limits, idioms, and the lifecycle. [RATIONALE.md](RATIONALE.md) explains the design. Existing sizing, unwrap, unsafe, and borrow-checker rules remain in force.
 
-`bin/rust-audit` is the standalone sizing/idiom auditor. `bin/rust-static-analysis` runs required Clippy, cargo-audit, cargo-deny, cargo-machete, and cargo-geiger review; flags select individual checks. `bin/analysis_support.rb` must remain beside the wrapper. `rust-install-tools` is the separately invoked tool bootstrapper. Run them by absolute path or explicitly authorize symlink installation into `~/bin`; this workflow does not install them automatically.
+`bin/rust-audit` is the standalone sizing/idiom auditor. `bin/rust-static-analysis` runs required Clippy, cargo-audit, cargo-deny, and cargo-machete review; flags select individual checks. `bin/analysis_support.rb` must remain beside the wrapper. `rust-install-tools` is the separately invoked tool bootstrapper. Run them by absolute path or explicitly authorize symlink installation into `~/bin`; this workflow does not install them automatically.
 
 `templates/` contains the entry points, copied `tooling.rb`/`language.rb` helpers, `settings.rb`, `AGENTS_SNIPPET.md`, `Makefile.snippet`, and optional `clippy.toml`. Portable shared acceptance tests live in `../test/`.
 
@@ -60,4 +60,4 @@ The default build uses `--workspace` and discovers workspace binary targets thro
 
 `BUMP_STATE` defaults to `.bump_state.json` and records the release count/version before checks. Set `BENCHMARK = ['tools/benchmark', '--rust-only'].freeze` for required fifth-bump benchmarks and `DEEP_TEST = ['tools/test_deep'].freeze` for twentieth-bump integration. `nil` disables a suite explicitly. Failures preserve pending state for inspection and resume.
 
-Full review requires cargo-audit, cargo-deny, cargo-machete, and cargo-geiger. Geiger reports unsafe usage; it is not a replacement for the sizing auditor's unsafe rules. `rust-static-analysis --dups` requires an executable project `tools/check_duplicates` implementing Rust clone review; the old Go `dupl` fallback is removed. Optional `--outdated` and `--semver` require their corresponding Cargo plugins.
+Full review requires cargo-audit, cargo-deny, and cargo-machete. The compiler and sizing auditor's unsafe rules remain in force. `rust-static-analysis --dups` requires an executable project `tools/check_duplicates` implementing Rust clone review; the old Go `dupl` fallback is removed. Optional `--outdated` and `--semver` require their corresponding Cargo plugins.

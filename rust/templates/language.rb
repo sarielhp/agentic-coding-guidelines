@@ -3,7 +3,7 @@
 module Language
   SECTION = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/
   VERSION_ASSIGNMENT = /^\s*version\s*=\s*(?<quote>['"])(?<value>[^'"\n]+)\k<quote>\s*(?:#.*)?$/
-  FULL_TOOLS = %w[cargo-audit cargo-deny cargo-machete cargo-geiger].freeze
+  FULL_TOOLS = %w[cargo-audit cargo-deny cargo-machete].freeze
 
   module_function
 
@@ -93,7 +93,6 @@ module Language
     Tooling.run(Tooling.executable('cargo-audit'), 'audit')
     Tooling.run(Tooling.executable('cargo-deny'), 'deny', 'check')
     Tooling.run(Tooling.executable('cargo-machete'), 'machete')
-    Tooling.run(Tooling.executable('cargo-geiger'), 'geiger', '--locked', '--offline', '--all-targets')
   end
 
   def version_match

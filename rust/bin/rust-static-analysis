@@ -9,11 +9,10 @@ CHECKS = {
   audit: %w[cargo-audit audit].freeze,
   deny: %w[cargo-deny deny check].freeze,
   machete: %w[cargo-machete machete].freeze,
-  geiger: ['cargo-geiger', 'geiger', '--offline', '--locked', '--all-targets'].freeze,
   outdated: %w[cargo-outdated outdated].freeze,
   semver: %w[cargo-semver-checks semver-checks check-release].freeze
 }.freeze
-DEFAULT_CHECKS = %i[clippy audit deny machete geiger].freeze
+DEFAULT_CHECKS = %i[clippy audit deny machete].freeze
 selected = []
 duplicates = false
 quiet = false

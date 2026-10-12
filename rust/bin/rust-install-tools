@@ -13,7 +13,6 @@ TOOLS = {
   'cargo-audit' => { crate: 'cargo-audit', desc: 'Vulnerability scanner (RustSec CVEs)' },
   'cargo-deny' => { crate: 'cargo-deny', desc: 'Supply-chain, license, and dependency ban checker' },
   'cargo-machete' => { crate: 'cargo-machete', desc: 'Unused dependencies scanner for Cargo.toml' },
-  'cargo-geiger' => { crate: 'cargo-geiger', desc: 'Unsafe code usage auditor' },
   # Testing & Quality Verification
   'cargo-nextest' => { crate: 'cargo-nextest', desc: 'Ultra-fast parallel test runner' },
   'cargo-mutants' => { crate: 'cargo-mutants', desc: 'Mutation testing tool to verify test quality' },
