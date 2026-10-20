@@ -120,7 +120,7 @@ function check_imports(root)
     mod = load_project(root)
     for name in ADVISORY_IMPORT_CHECKS
         msg = run_import_check(EI, name, mod)
-        msg === nothing || println("advisory  ", msg)
+        msg === nothing || println("advisory  ", first(msg, 240), length(msg) > 240 ? " ..." : "")
     end
     problems =
         filter(!isnothing, [run_import_check(EI, n, mod) for n in ENFORCED_IMPORT_CHECKS])
