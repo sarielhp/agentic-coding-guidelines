@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# ~/prog/standards/julia/bin/julia-static-analysis
+#
+# Runs the Julia analyzers through julia-checks.jl:
+#   --syntax   every file parses
+#   --format   every file is formatted with JuliaFormatter (project .JuliaFormatter.toml)
+#   --jet      JET type-inference analysis of the project's module
+#   --imports  ExplicitImports hygiene checks of the project's module
+#   --aqua     Aqua.test_all of the project's module
+#
+# The analysis packages live in a dedicated Julia environment created only by
+# julia-install-tools; this script never installs anything. Set
+# JULIA_STANDARDS_ENV to use another environment directory.
+# ==============================================================================
+
+require 'optparse'
+require File.join(__dir__, 'analysis_support')
+
+CHECKS = File.join(__dir__, 'julia-checks.jl')
+CHECK_KEYS = %i[syntax format jet imports aqua].freeze
+
+def tools_environment
+  File.expand_path(ENV.fetch('JULIA_STANDARDS_ENV', '~/.julia/environments/standards-julia'))
+end
+
+def require_tools_environment
+  return if File.file?(File.join(tools_environment, 'Project.toml'))
+
+  raise "Julia tools environment missing: #{tools_environment}; bootstrap separately with julia-install-tools"
+end
+
+def default_checks(single, project)
+  selected = %i[syntax format]
+  selected.push(:jet, :imports) if !single && project
+  selected
+end
+
+def run_check(check, files, root)
+  julia = AnalysisSupport.executable('julia')
+  project = root ? ["--project=#{root}"] : []
+  arguments = %i[syntax format].include?(check) ? files : [root]
+  env = { 'JULIA_LOAD_PATH' => ['@', tools_environment, '@stdlib'].join(File::PATH_SEPARATOR) }
+  out, err, status = Open3.capture3(env, [julia, julia], '--startup-file=no', *project, CHECKS, check.to_s,
+                                    *arguments)
+  $stdout.write(out)
+  $stderr.write(err)
+  raise "#{check} check failed" unless status.success?
+end
+
+def parse_options(args)
+  selected = []
+  quiet = false
+  OptionParser.new do |opts|
+    opts.banner = 'Usage: julia-static-analysis [checks] [paths...]'
+    CHECK_KEYS.each { |key| opts.on("--#{key}", "Run #{key} check") { selected << key } }
+    opts.on('--strict', 'Compatibility option; failures always exit nonzero') { selected.uniq! }
+    opts.on('-q', '--quiet', 'Suppress headings') { quiet = true }
+    opts.on('--version', 'Show version') do
+      puts 'julia-static-analysis v0.1.0'
+      exit
+    end
+    opts.on('-h', '--help', 'Show help') do
+      puts opts
+      exit
+    end
+  end.parse!(args)
+  [selected, quiet]
+end
+
+def main
+  selected, quiet = parse_options(ARGV)
+  paths = ARGV.empty? ? ['.'] : ARGV
+  files = AnalysisSupport.julia_files(paths)
+  abort 'no Julia sources found in requested paths' if files.empty?
+
+  root = AnalysisSupport.project_root(files.first)
+  single = paths.length == 1 && File.file?(paths.first)
+  selected = default_checks(single, root) if selected.empty?
+  raise "#{selected.join(', ')} need a project (Project.toml)" if root.nil? && selected.intersect?(%i[jet imports aqua])
+
+  require_tools_environment if selected.intersect?(%i[format jet imports aqua])
+  selected.each { |check| run_check(check, files, root) }
+  puts 'Static review passed' unless quiet
+rescue StandardError => e
+  abort e.message
+end
+
+main

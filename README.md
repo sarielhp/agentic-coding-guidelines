@@ -3,6 +3,7 @@
 [![Go Standards](https://img.shields.io/badge/Language-Go-00ADD8?style=flat&logo=go)](go/GUIDELINES.md)
 [![Rust Standards](https://img.shields.io/badge/Language-Rust-dea584?style=flat&logo=rust)](rust/GUIDELINES.md)
 [![Ruby Standards](https://img.shields.io/badge/Language-Ruby-CC342D?style=flat&logo=ruby)](ruby/GUIDELINES.md)
+[![Julia Standards](https://img.shields.io/badge/Language-Julia-9558B2?style=flat&logo=julia)](julia/GUIDELINES.md)
 [![Review Cycle](https://img.shields.io/badge/Workflow-Review%20Cycle-8A2BE2?style=flat)](workflow/README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -71,6 +72,18 @@ agentic-coding-guidelines/
 │       ├── bump.rb          # Full-checked patch bump and verified upstream push
 │       ├── install.rb       # Declared installation and content verification
 │       └── release.rb       # Commit, bump, push; installation opt-in
+├── julia/
+│   ├── README.md             # Julia quick reference & CLI usage
+│   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
+│   ├── RATIONALE.md          # Type stability, return-type, @fastmath and refactoring-safety evidence
+│   ├── bin/                  # Standalone verification CLI tools
+│   │   ├── julia-audit       # AST depth, cognitive complexity, sizing & trap auditor (Ruby CLI)
+│   │   ├── julia-ast-metrics.jl # Metrics extractor built on Base.JuliaSyntax (no packages)
+│   │   ├── julia-static-analysis # Syntax, JuliaFormatter, JET, ExplicitImports, Aqua
+│   │   ├── julia-checks.jl   # Julia-side runner for the static analyzers
+│   │   ├── analysis_support.rb # Required wrapper support
+│   │   └── julia-install-tools # Tools-environment auditor/installer (separately authorized)
+│   └── templates/            # AGENTS_SNIPPET.md and dot_JuliaFormatter.toml
 ├── rust/
 │   ├── README.md             # Rust quick reference & CLI usage
 │   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
@@ -102,7 +115,7 @@ agentic-coding-guidelines/
 │       ├── Makefile.snippet  # Delegates to canonical scripts
 │       ├── *.rb             # build/lint/test/gate/check/snapshot/commit/bump/install/release
 │       └── dot_rubocop.yml   # Balanced RuboCop configuration template
-├── test/                     # Rust/Ruby lifecycle, analyzer and real language fixtures
+├── test/                     # Rust/Ruby lifecycle and analyzer tests, Julia auditor tests, real language fixtures
 └── workflow/                 # Review-cycle CONTRACT (the engine lives in ~/prog/26/ruby/review_cycle)
     ├── README.md             # What a repository provides: tools/gate, tools/build, review_cycle.json
     └── templates/            # Project configuration templates
@@ -118,7 +131,7 @@ To bring any new or existing repository under these standards in 3 deterministic
 
 ### Step 1: Adopt language workflow templates
 
-Follow the language-specific bootstrap instructions in [Go](go/README.md), [Rust](rust/README.md), or [Ruby](ruby/README.md). Copy the entry points together with their helpers and settings; adapt the project artifact layout, checks, version source, and installation destinations. Include that language's Makefile and agent snippets. Existing projects require explicit migration; these templates do not update them automatically.
+Follow the language-specific bootstrap instructions in [Go](go/README.md), [Rust](rust/README.md), [Ruby](ruby/README.md), or [Julia](julia/README.md). Copy the entry points together with their helpers and settings; adapt the project artifact layout, checks, version source, and installation destinations. Include that language's Makefile and agent snippets. Existing projects require explicit migration; these templates do not update them automatically.
 
 ### Step 2: Bootstrap the Review & Quality Contract
 

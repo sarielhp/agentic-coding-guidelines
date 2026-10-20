@@ -11,3 +11,12 @@ The suite needs MRI Ruby 3.2 or later, minitest, Git, Make, and a Cargo toolchai
 Coverage includes checked Git failures, local-only commits, exact upstream publication, annotated tag verification, rejected push and resume, input changes, commit-hook mutations, opt-in installation and byte/permission verification, missing commands, artifact containment, Ruby scope promotion, parser failures, test failures, Cargo binaries/libraries/workspaces, version/lock synchronization, and fifth/twentieth milestone failures.
 
 Validate changed Ruby implementation files with strict `ruby-audit --include-tests` and syntax/RuboCop review separately. Flay and dependency security analyzers must also be exercised in the adopting project's full gate once separately bootstrapped. The portable adapters verify their failure/report handling, not the completeness of external security or clone analyzers.
+
+## Julia tests
+
+`julia_audit_test.rb` exercises `julia/bin/julia-audit` and its metrics helper on small Julia fixtures (exact depth/complexity values, tiers, file limits, trap rules, markers, exit status). `julia_static_analysis_test.rb` exercises `julia-static-analysis` and `julia-install-tools --check-only` (syntax, formatting, JET, ExplicitImports, missing tools). Both need Julia 1.10 or later; the second also needs a tools environment (`JULIA_STANDARDS_ENV` pointing at one with JuliaFormatter, JET, ExplicitImports, and Aqua) and skips itself otherwise. Neither installs packages.
+
+```bash
+rtk proxy ruby test/julia_audit_test.rb
+JULIA_STANDARDS_ENV=~/.julia/environments/standards-julia rtk proxy ruby test/julia_static_analysis_test.rb
+```

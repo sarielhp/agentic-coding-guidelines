@@ -1,0 +1,101 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# ~/prog/standards/julia/bin/julia-install-tools
+#
+# Environment auditor and installer for Julia development tooling. The analysis
+# packages go into one dedicated Julia environment (default
+# ~/.julia/environments/standards-julia, override with JULIA_STANDARDS_ENV), never
+# into a project:
+#   JuliaFormatter  formatting            JET              type-inference analysis
+#   ExplicitImports import hygiene        Aqua             package quality checks
+# The quality gates never install anything; run this script separately, with
+# --check-only to audit without changing anything.
+# ==============================================================================
+
+require 'fileutils'
+require 'optparse'
+require File.join(__dir__, 'analysis_support')
+
+module JuliaDevInstaller
+  GREEN = "\e[32m"
+  YELLOW = "\e[33m"
+  RED = "\e[31m"
+  BOLD = "\e[1m"
+  RESET = "\e[0m"
+
+  PACKAGES = {
+    'JuliaFormatter' => 'Code formatter',
+    'JET' => 'Type-inference based error and instability analysis',
+    'ExplicitImports' => 'Import hygiene checks',
+    'Aqua' => 'Package quality checks (ambiguities, piracy, stale dependencies)'
+  }.freeze
+
+  LIST_DEPENDENCIES = <<~JULIA
+    import TOML
+    project = TOML.parsefile(joinpath(dirname(Base.active_project()), "Project.toml"))
+    foreach(println, keys(get(project, "deps", Dict())))
+  JULIA
+
+  def self.environment
+    File.expand_path(ENV.fetch('JULIA_STANDARDS_ENV', '~/.julia/environments/standards-julia'))
+  end
+
+  def self.julia_code(code)
+    julia = AnalysisSupport.executable('julia')
+    AnalysisSupport.capture(julia, '--startup-file=no', "--project=#{environment}", '-e', code)
+  end
+
+  def self.installed
+    return [] unless File.file?(File.join(environment, 'Project.toml'))
+
+    out, = julia_code(LIST_DEPENDENCIES)
+    out.split
+  end
+
+  def self.install(missing)
+    FileUtils.mkdir_p(environment)
+    list = missing.map { |name| "\"#{name}\"" }.join(', ')
+    _, err, status = julia_code("import Pkg; Pkg.add([#{list}]); Pkg.precompile()")
+    raise "installation failed:\n#{err}" unless status.success?
+  end
+
+  def self.report(name, present)
+    state = present ? "#{GREEN}OK#{RESET}" : "#{YELLOW}MISSING#{RESET}"
+    puts "  [#{state}] #{BOLD}#{name}#{RESET} (#{PACKAGES[name]})"
+  end
+
+  def self.tools_complete?(check_only)
+    puts "#{BOLD}==> Checking Julia tooling in #{environment}#{RESET}"
+    present = installed
+    PACKAGES.each_key { |name| report(name, present.include?(name)) }
+    missing = PACKAGES.keys - present
+    return true if missing.empty?
+    return false if check_only
+
+    install(missing)
+    (PACKAGES.keys - installed).empty?
+  end
+
+  def self.run(args = ARGV)
+    check_only = false
+    OptionParser.new do |opts|
+      opts.banner = 'Usage: julia-install-tools [options]'
+      opts.on('-c', '--check-only', 'Audit the environment without installing anything') { check_only = true }
+      opts.on('-h', '--help', 'Show this help') do
+        puts opts
+        exit 0
+      end
+    end.parse!(args)
+
+    complete = tools_complete?(check_only)
+    puts(complete ? 'Environment audit complete.' : "#{RED}Required packages missing or installation failed.#{RESET}")
+    complete ? 0 : 1
+  rescue StandardError => e
+    warn "julia-install-tools: #{e.message}"
+    2
+  end
+end
+
+exit JuliaDevInstaller.run if $PROGRAM_NAME == __FILE__

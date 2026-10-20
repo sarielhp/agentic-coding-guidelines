@@ -1,0 +1,25 @@
+## Julia Tooling and Authorization
+
+Follow the Julia [GUIDELINES](~/prog/standards/julia/GUIDELINES.md) and
+[RATIONALE](~/prog/standards/julia/RATIONALE.md). Code is formatted with
+JuliaFormatter's default style (`.JuliaFormatter.toml`); formatting changes go in their
+own commit.
+
+Use the exact command forms when applicable:
+
+| Command | Use |
+|---|---|
+| `rtk proxy julia-audit --strict` | Depth, complexity, size, idiom and trap audit |
+| `rtk proxy julia-static-analysis [paths]` | Syntax, formatting; JET and imports for a project |
+| `rtk proxy julia-static-analysis --aqua` | Aqua package checks (also run by the test suite) |
+| `rtk proxy julia --project=. -e 'using Pkg; Pkg.test()'` | Run the test suite |
+
+Run routine audits and tests for authorized work. Existing command approval allows
+execution; it does not authorize commits, releases, registration, or changes outside
+the task. Reuse authorization already given in the session. Keep sandboxing and manual
+approval review enabled. Bootstrap the analysis packages separately, when authorized, with
+`julia-install-tools`; the gates never install anything. Never enlarge an allow marker
+(`# julia-audit: allow-<rule>`) to hide a new finding.
+
+Before any refactor of numerical code, record the outputs on fixed inputs and require
+bit-identical results afterwards; a result change is its own deliberate commit.

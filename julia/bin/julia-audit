@@ -1,0 +1,270 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# ~/prog/standards/julia/bin/julia-audit
+#
+# AST code metrics and sizing auditor for Julia. The measuring is done by
+# julia-ast-metrics.jl, which uses the JuliaSyntax parser that ships inside Julia
+# (Julia >= 1.10); this script applies the standards:
+# 1. Nesting depth <= 4 (hard limit)
+# 2. Cognitive complexity <= 15 (hard limit)
+# 3. Method length <= 80 code lines (<= 120 if cognitive complexity <= 5)
+# 4. File sizing: soft warning at 800 lines, hard limit at 1100 lines
+# 5. Argument count: warning above 5
+# 6. Idiom and trap rules reported by the helper (else after return, swallowed
+#    exceptions, exit in library code, @fastmath, runtime eval, ...)
+# ==============================================================================
+
+require 'optparse'
+require File.join(__dir__, 'analysis_support')
+
+module JuliaCodeAuditor
+  VERSION = '0.1.0'
+  HELPER = File.join(__dir__, 'julia-ast-metrics.jl')
+  BATCH = 150
+  DECLARATIVE_COMPLEXITY_CEILING = 5
+
+  DEFAULTS = {
+    max_depth: 4,
+    max_complexity: 15,
+    max_logic_lines: 80,
+    max_declarative_lines: 120,
+    max_args: 5,
+    soft_file_lines: 800,
+    max_file_lines: 1100,
+    include_tests: false,
+    strict: false,
+    quiet: false,
+    verbose: false
+  }.freeze
+
+  Definition = Struct.new(:file, :name, :line, :last_line, :lines, :depth, :cognitive, :cyclomatic, :args)
+  Finding = Struct.new(:file, :line, :severity, :rule, :message)
+  FileInfo = Struct.new(:file, :lines, :library)
+  Results = Struct.new(:files, :definitions, :findings, :errors)
+
+  # --- Record parsing ---------------------------------------------------------
+
+  def self.parse_record(fields, results)
+    case fields[0]
+    when 'FILE' then results.files << FileInfo.new(fields[1], fields[2].to_i, fields[3] == '1')
+    when 'DEF' then results.definitions << parse_definition(fields)
+    when 'FIND' then results.findings << Finding.new(fields[1], fields[2].to_i, fields[3].to_sym, fields[4], fields[5])
+    when 'ERR' then results.errors << "#{fields[1]}: #{fields[2]}"
+    end
+  end
+
+  def self.parse_definition(fields)
+    numbers = fields[3..].map(&:to_i)
+    Definition.new(fields[1], fields[2], *numbers)
+  end
+
+  # Files under a project's src/ or ext/ are included into its module, so they are
+  # library code even without a `module` line of their own.
+  def self.library_path?(path)
+    root = AnalysisSupport.project_root(path)
+    return false unless root
+
+    relative = File.expand_path(path).delete_prefix("#{root}/")
+    relative.start_with?('src/', 'ext/')
+  end
+
+  def self.run_helper(julia, flag, files, results)
+    files.each_slice(BATCH) do |batch|
+      out, err, status = AnalysisSupport.capture(julia, '--startup-file=no', '--history-file=no', HELPER, flag, *batch)
+      raise "julia-ast-metrics failed:\n#{err}" unless status.success?
+
+      out.each_line { |line| parse_record(line.chomp.split("\t"), results) }
+    end
+  end
+
+  def self.measure(files)
+    results = Results.new([], [], [], [])
+    julia = AnalysisSupport.executable('julia')
+    library, scripts = files.partition { |path| library_path?(path) }
+    run_helper(julia, '--library', library, results)
+    run_helper(julia, '--script', scripts, results)
+    results
+  end
+
+  # --- Policy -----------------------------------------------------------------
+
+  def self.definition_reasons(definition, options)
+    reasons = []
+    reasons << "depth #{definition.depth} > #{options[:max_depth]}" if definition.depth > options[:max_depth]
+    reasons << "complexity #{definition.cognitive} > #{options[:max_complexity]}" if definition.cognitive > options[:max_complexity]
+    limit = line_limit(definition, options)
+    reasons << "lines #{definition.lines} > #{limit}" if definition.lines > limit
+    reasons
+  end
+
+  def self.line_limit(definition, options)
+    return options[:max_declarative_lines] if definition.cognitive <= DECLARATIVE_COMPLEXITY_CEILING
+
+    options[:max_logic_lines]
+  end
+
+  def self.file_status(info, options)
+    return nil if exempt_file?(info.file)
+    return :hard if info.lines > options[:max_file_lines]
+
+    :soft if info.lines > options[:soft_file_lines]
+  end
+
+  def self.exempt_file?(path)
+    return true if File.basename(path).match?(/(?:catalog|data|dict|fixtures|diagnostics)/i)
+
+    File.read(path).include?('julia-audit: allow-long-file')
+  end
+
+  # --- File discovery ---------------------------------------------------------
+
+  def self.test_file?(path)
+    base = File.basename(path)
+    base == 'runtests.jl' || base.start_with?('test_') || base.end_with?('_test.jl') ||
+      path.include?('/test/')
+  end
+
+  def self.default_project_files
+    root = `git rev-parse --show-toplevel 2>/dev/null`.strip
+    root = Dir.pwd if root.empty?
+    patterns = %w[src/**/*.jl ext/**/*.jl test/**/*.jl bin/* tools/* scripts/* *.jl]
+    patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern)) }
+  end
+
+  def self.collect_target_files(paths, include_tests)
+    files = paths.empty? ? AnalysisSupport.julia_files(default_project_files) : AnalysisSupport.julia_files(paths)
+    include_tests ? files : files.reject { |path| test_file?(path) }
+  end
+
+  # --- Command line -----------------------------------------------------------
+
+  def self.add_limit_options(opts, options)
+    {
+      '--max-depth' => [:max_depth, 'Max nesting depth'],
+      '--max-complexity' => [:max_complexity, 'Max cognitive complexity'],
+      '--max-logic-lines' => [:max_logic_lines, 'Max code lines for logic methods'],
+      '--max-declarative-lines' => [:max_declarative_lines, 'Max code lines for declarative methods'],
+      '--max-args' => [:max_args, 'Argument count above which to warn'],
+      '--soft-file-lines' => [:soft_file_lines, 'Soft file line warning threshold'],
+      '--max-file-lines' => [:max_file_lines, 'Hard file line limit']
+    }.each do |flag, (key, text)|
+      opts.on("#{flag} N", Integer, "#{text} (default: #{DEFAULTS[key]})") { |value| options[key] = value }
+    end
+  end
+
+  def self.add_mode_options(opts, options)
+    opts.on('--include-tests', 'Include test files in audit') { options[:include_tests] = true }
+    opts.on('--strict', 'Treat warnings as fatal errors') { options[:strict] = true }
+    opts.on('-q', '--quiet', 'Show only violations and warnings') { options[:quiet] = true }
+    opts.on('-v', '--verbose', 'Show the most complex audited methods') { options[:verbose] = true }
+    opts.on('--version', 'Show version and exit') do
+      puts "julia-audit v#{VERSION}"
+      exit 0
+    end
+    opts.on('-h', '--help', 'Show this help message') do
+      puts opts
+      exit 0
+    end
+  end
+
+  def self.parse_cli_options(args)
+    options = DEFAULTS.dup
+    parser = OptionParser.new do |opts|
+      opts.banner = 'Usage: julia-audit [options] [files/directories...]'
+      add_limit_options(opts, options)
+      add_mode_options(opts, options)
+    end
+    [options, parser.parse!(args)]
+  end
+
+  # --- Reporting --------------------------------------------------------------
+
+  def self.print_verbose(results)
+    puts "Audited #{results.definitions.length} methods across #{results.files.length} files."
+    results.definitions.sort_by { |d| -d.cognitive }.first(20).each do |d|
+      puts format('  %<file>-28s %<name>-30s (L%<line>4d): lines=%<lines>3d, depth=%<depth>d, cc=%<cc>2d',
+                  file: File.basename(d.file), name: d.name, line: d.line, lines: d.lines, depth: d.depth,
+                  cc: d.cognitive)
+    end
+    puts ''
+  end
+
+  def self.print_warnings(results, options)
+    results.files.each do |info|
+      next unless file_status(info, options) == :soft
+
+      puts "  \e[33m⚠️ Warning: File exceeds soft limit (#{options[:soft_file_lines]} lines): " \
+           "#{info.file} (#{info.lines} lines)\e[0m"
+    end
+    results.findings.select { |f| f.severity == :warn }.each do |f|
+      puts "  \e[33m⚠️ Style: #{f.file}:#{f.line} [#{f.rule}] #{f.message}\e[0m"
+    end
+    results.definitions.select { |d| d.args > options[:max_args] }.each do |d|
+      puts "  \e[33m⚠️ Style: #{d.file}:#{d.line} [argument-count] #{d.name} takes #{d.args} arguments " \
+           "(> #{options[:max_args]})\e[0m"
+    end
+  end
+
+  def self.print_traps(traps)
+    return if traps.empty?
+
+    puts "\n\e[31m❌ Critical Julia trap violations:\e[0m"
+    traps.each { |t| puts "  \e[31m#{t.file}:#{t.line}\e[0m [#{t.rule}]: #{t.message}" }
+  end
+
+  def self.print_metric_violations(results, options)
+    hard = results.files.select { |info| file_status(info, options) == :hard }
+    bad = results.definitions.map { |d| [d, definition_reasons(d, options)] }.reject { |_, r| r.empty? }
+    return 0 if hard.empty? && bad.empty?
+
+    puts "\n\e[31m❌ Code metric violations found:\e[0m"
+    hard.each do |info|
+      puts "  \e[31m#{info.file}\e[0m: File length #{info.lines} exceeds hard limit of #{options[:max_file_lines]} lines"
+    end
+    bad.each do |d, reasons|
+      puts "  \e[31m#{d.file}:#{d.line}\e[0m - \e[1m#{d.name}\e[0m: #{reasons.join(', ')} " \
+           "[lines=#{d.lines}, depth=#{d.depth}, cc=#{d.cognitive}]"
+    end
+    hard.length + bad.length
+  end
+
+  def self.warnings?(results, options)
+    results.files.any? { |info| file_status(info, options) == :soft } ||
+      results.findings.any? { |f| f.severity == :warn } ||
+      results.definitions.any? { |d| d.args > options[:max_args] }
+  end
+
+  def self.report_results(results, options)
+    print_verbose(results) if options[:verbose]
+    print_warnings(results, options)
+    results.errors.each { |message| puts "\e[31m❌ Parse error: #{message}\e[0m" }
+    traps = results.findings.select { |f| f.severity == :trap }
+    print_traps(traps)
+    failed = print_metric_violations(results, options)
+    return 1 if failed.positive? || traps.any? || results.errors.any?
+    return strict_failure if options[:strict] && warnings?(results, options)
+
+    puts "\e[32m✔ Code metrics check passed: #{results.definitions.length} methods compliant.\e[0m" unless options[:quiet]
+    0
+  end
+
+  def self.strict_failure
+    puts "\n\e[31m❌ Strict check failed due to warnings.\e[0m"
+    1
+  end
+
+  def self.run(args = ARGV)
+    options, paths = parse_cli_options(args)
+    files = collect_target_files(paths, options[:include_tests])
+    abort 'no Julia sources found in requested paths' if files.empty?
+
+    report_results(measure(files), options)
+  rescue StandardError => e
+    warn "julia-audit: #{e.message}"
+    2
+  end
+end
+
+exit JuliaCodeAuditor.run if $PROGRAM_NAME == __FILE__
