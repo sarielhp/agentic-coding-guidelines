@@ -14,6 +14,10 @@ module ToolSettings
   VERSION_KIND = :embedded
   # Additional generator/version update commands are checked argument arrays.
   VERSION_UPDATE = [].freeze
+  # A bump moves the go.mod toolchain line to the latest patch of the Go in
+  # use (go get toolchain@patch) before the full gate, so a release builds with
+  # a patched standard library. false leaves go.mod alone.
+  UPDATE_TOOLCHAIN = true
   FAST_CHECKS = [].freeze
   FULL_CHECKS = [].freeze
   TEST_TIMEOUT = '180s'

@@ -35,7 +35,7 @@ This directory defines the authoritative architecture, cognitive complexity boun
 |---|---|---|
 | `go-audit [dir]` | Audits functions against cognitive limits (depth $\le 4$, branches $\le 15$, tiered lines). | Pre-commit / `make audit` |
 | `go-static-analysis [dir]` | Runs `gocritic`, `shadow`, `revive`, `govulncheck`, and `dupl`. | Periodic / `make review` |
-| `go-install-tools` | Installs staticcheck and deep analyzers using configured Go installation locations. | Separately authorized bootstrap |
+| `go-install-tools [--rebuild]` | Installs staticcheck and the deep analyzers, and rebuilds any built with another Go than the one in use. Run from the project. | Separately authorized bootstrap, and after a toolchain change |
 
 ## Adopt the Repository Interface
 
@@ -73,6 +73,10 @@ Edit `tools/settings.rb` before use:
   `VERSION_KIND = :embedded` conservatively runs full checking after the bump.
   `VERSION_UPDATE` contains explicit command arrays for source version updates,
   generators, or project-specific metadata. They run before full checking.
+- `UPDATE_TOOLCHAIN = true` makes a bump move the `go.mod` toolchain line to the
+  latest patch of the Go in use (`go get toolchain@patch`) before full checking,
+  so a release builds with a patched standard library and govulncheck stays
+  clean. `false` leaves `go.mod` alone.
 - Set `VERSION_KIND = :metadata` only for standalone metadata. Reuse requires
   unchanged full verification, no version-update commands, and `go list` showing
   that the version file is not embedded. Reused checks still rebuild artifacts.
@@ -122,10 +126,19 @@ and old `.verified_head` markers never establish full verification. Commit hooks
 that change inputs block verification. A source change cannot become safe merely
 because its filename was declared version metadata.
 
+The tools run `go` with `GOTOOLCHAIN=auto`, so `go.mod` decides the Go version:
+the newer of the local installation and the `toolchain` line, downloaded when
+needed. The full gate refuses analyzers built with another Go than the one in
+use, naming them, because such an analyzer misreads the export data (gocritic
+reported every type assertion as sloppy after a patch release); `go-install-tools`
+rebuilds them. gocritic is built with `golang.org/x/tools` at its latest release,
+since the version it pins lags the toolchain's export format.
+
 Bump preflights version format, clean state, and branch/upstream settings. It
 requires one configured upstream push URL and explicitly pushes `SHA:refs/heads/…`
-to that URL, then queries the same URL and ref. It does not force, pull, rebase,
-tag, or install. Local changes and a pending-release record survive failures.
+to that URL, then queries the same URL and ref. With `UPDATE_TOOLCHAIN` it first
+moves the toolchain line to the current patch, which the release commit carries.
+It does not force, pull, rebase, tag, or install. Local changes and a pending-release record survive failures.
 If push or remote verification fails, inspect the commit and retry:
 
 ```bash

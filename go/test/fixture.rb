@@ -39,7 +39,10 @@ class ToolFixture < Minitest::Test
       exec(ENV.fetch(tool == 'go' ? 'REAL_GO' : 'REAL_GOFMT'), *ARGV)
     end
     if tool == 'go'
-      puts '{}' if ARGV.first == 'env'
+      File.write(ENV['TOOLCHAIN_TRACE'], ENV.fetch('GOTOOLCHAIN', '')) if ENV['TOOLCHAIN_TRACE']
+      puts 'go1.26.0' if ARGV == ['env', 'GOVERSION']
+      puts '{}' if ARGV.first == 'env' && ARGV != ['env', 'GOVERSION']
+      puts "#{ARGV.last}: #{ENV['ANALYZER_GO']}" if ARGV.first == 'version' && ENV['ANALYZER_GO']
       puts 'main' if ARGV == ['list', '-f', '{{.Name}}', '.']
       puts "#{Dir.pwd}|#{ENV.fetch('EMBED_FILES', '')}" if ARGV.first == 'list' && ARGV.last == './...'
       if ARGV.first == 'build' && ARGV.include?('-o')

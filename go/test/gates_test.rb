@@ -111,6 +111,20 @@ class GatesTest < ToolFixture
     assert_match(/new findings/, fails('lint', env: { 'USE_REAL_GO' => '1' }))
   end
 
+  def test_gate_runs_go_with_the_automatic_toolchain
+    path = File.join(@tmp, 'toolchain')
+    succeeds('gate', env: { 'GOTOOLCHAIN' => 'local', 'TOOLCHAIN_TRACE' => path })
+    assert_equal 'auto', File.read(path)
+  end
+
+  def test_full_gate_rejects_analyzers_built_with_another_go
+    succeeds('gate', '--full', env: { 'ANALYZER_GO' => 'go1.26.0' })
+    reset_trace
+    err = fails('gate', '--full', env: { 'ANALYZER_GO' => 'go1.25.9' })
+    assert_match(/analyzers built with another Go than go1.26.0: staticcheck \(go1.25.9\).*go-install-tools/, err)
+    refute(trace.any? { |row| row.first == 'govulncheck' })
+  end
+
   def test_make_delegates_once
     write('Makefile', File.read(File.join(TEMPLATES, 'Makefile.snippet')))
     %w[gate check lint ci].each do |target|

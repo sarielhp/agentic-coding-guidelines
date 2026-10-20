@@ -1,12 +1,14 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'open3'
+# Installs the analyzers the gates run, and rebuilds any that another Go
+# built. An analyzer reads the export data of the Go that runs it, and one
+# built for a different release misreads it: gocritic flagged every type
+# assertion after a patch release. Run it from the project, so that under
+# GOTOOLCHAIN=auto the Go is the one its go.mod names. --rebuild rebuilds all.
 
-configured = [ENV.fetch('GOBIN', nil), ENV.fetch('GOPATH', '').split(File::PATH_SEPARATOR).map { |path| File.join(path, 'bin') }]
-paths = configured.flatten.compact + ENV.fetch('PATH', '').split(File::PATH_SEPARATOR) +
-        [File.expand_path('~/.go/bin'), File.expand_path('~/go/bin')]
-ENV['PATH'] = paths.uniq.join(File::PATH_SEPARATOR)
+require 'open3'
+require 'tmpdir'
 
 TOOLS = {
   'staticcheck' => 'honnef.co/go/tools/cmd/staticcheck@latest',
@@ -17,31 +19,96 @@ TOOLS = {
   'govulncheck' => 'golang.org/x/vuln/cmd/govulncheck@latest'
 }.freeze
 
-puts "\e[1m=== Installing Static Code Analysis Tools ===\e[0m\n"
+# gocritic pins an x/tools whose export-data reader lags the toolchain, so it
+# is built in a scratch module with these dependencies at their latest release.
+LATEST_DEPS = { 'gocritic' => ['golang.org/x/tools@latest'] }.freeze
 
-installed = 0
-failed = 0
+def search_paths
+  configured = [ENV.fetch('GOBIN', nil), ENV.fetch('GOPATH', '').split(File::PATH_SEPARATOR).map { |p| File.join(p, 'bin') }]
+  (configured.flatten.compact + ENV.fetch('PATH', '').split(File::PATH_SEPARATOR) +
+    [File.expand_path('~/.go/bin'), File.expand_path('~/go/bin')]).uniq
+end
 
-TOOLS.each do |binary, pkg|
-  bin_path = paths.map { |path| File.join(path, binary) }.find { |path| File.file?(path) && File.executable?(path) }
-  if bin_path
-    puts "  \e[32m✔\e[0m #{binary} already installed at #{bin_path}"
-    installed += 1
-    next
-  end
+# Where a new analyzer goes: GOBIN, the first GOPATH's bin, or ~/.go/bin.
+def install_dir
+  ENV['GOBIN'] || ENV.fetch('GOPATH', '').split(File::PATH_SEPARATOR).map { |p| File.join(p, 'bin') }.first ||
+    File.expand_path('~/.go/bin')
+end
 
-  puts "  Installing #{binary} from #{pkg}..."
-  stdout, stderr, status = Open3.capture3('go', 'install', pkg)
-  if status.success?
-    puts "  \e[32m✔\e[0m Successfully installed #{binary}"
-    installed += 1
-  else
-    puts "  \e[31m✗\e[0m Failed to install #{binary}:"
-    puts stdout unless stdout.empty?
-    puts stderr unless stderr.empty?
-    failed += 1
+def installed(binary)
+  search_paths.map { |dir| File.join(dir, binary) }.find { |path| File.file?(path) && File.executable?(path) }
+end
+
+def go(*, env: {}, chdir: Dir.pwd)
+  out, err, status = Open3.capture3(env, 'go', *, chdir: chdir)
+  [out, err, status.success?]
+end
+
+def running_go
+  out, _err, ok = go('env', 'GOVERSION')
+  ok ? out.strip : ''
+end
+
+# The Go recorded in the analyzer's build information, or nil.
+def built_with(path)
+  out, _err, ok = go('version', '-m', path)
+  ok ? out.lines.first.to_s[/:\s+(go\d+\.\d+\.\d+)\s*\z/, 1] : nil
+end
+
+def install(binary, pkg, dir)
+  env = { 'GOBIN' => dir }
+  return go('install', pkg, env: env) unless LATEST_DEPS.key?(binary)
+
+  Dir.mktmpdir("#{binary}-build-") do |scratch|
+    steps = [%w[mod init scratch], ['get', pkg, *LATEST_DEPS.fetch(binary)], ['install', pkg.sub(/@.*\z/, '')]]
+    result = nil
+    steps.each do |args|
+      result = go(*args, env: env, chdir: scratch)
+      break unless result.last
+    end
+    result
   end
 end
 
-puts "\n\e[1mSummary:\e[0m #{installed} installed, #{failed} failed"
-exit(failed.positive? ? 1 : 0)
+def report(binary, out, err, success)
+  puts(success ? "  \e[32m✔\e[0m #{binary} installed" : "  \e[31m✗\e[0m #{binary} failed to install:")
+  return if success
+
+  puts out unless out.empty?
+  puts err unless err.empty?
+end
+
+# Whether the analyzer at path needs (re)building for the Go in use, and why.
+def stale_reason(path, running, rebuild)
+  return 'not installed' unless path
+  return 'rebuild requested' if rebuild
+
+  built = built_with(path)
+  "built with #{built}, #{running} is in use" if built && !running.empty? && built != running
+end
+
+# Installs or rebuilds each analyzer and returns how many failed.
+def install_all(rebuild)
+  running = running_go
+  puts "\e[1m=== Installing Static Code Analysis Tools (#{running.empty? ? 'Go version unknown' : running}) ===\e[0m\n"
+  failed = 0
+  TOOLS.each do |binary, pkg|
+    path = installed(binary)
+    reason = stale_reason(path, running, rebuild)
+    if reason.nil?
+      puts "  \e[32m✔\e[0m #{binary} already installed at #{path}"
+      next
+    end
+    puts "  Installing #{binary} (#{reason}) from #{pkg}..."
+    out, err, success = install(binary, pkg, path ? File.dirname(path) : install_dir)
+    report(binary, out, err, success)
+    failed += 1 unless success
+  end
+  puts "\n\e[1mSummary:\e[0m #{TOOLS.size - failed} installed, #{failed} failed"
+  failed
+end
+
+abort 'Usage: go-install-tools [--rebuild]' unless ARGV.empty? || ARGV == ['--rebuild']
+ENV['PATH'] = search_paths.join(File::PATH_SEPARATOR)
+ENV['GOTOOLCHAIN'] ||= 'auto'
+exit(install_all(ARGV.first == '--rebuild').zero? ? 0 : 1)

@@ -84,6 +84,20 @@ class LifecycleTest < ToolFixture
     assert(trace.any? { |row| row.include?('-race') })
   end
 
+  def test_bump_moves_the_toolchain_to_the_current_patch
+    add_remote
+    succeeds('bump')
+    gets = trace.select { |row| row[0..1] == %w[go get] }.map { |row| row[2] }
+    assert_equal ['toolchain@go1.26.0', 'toolchain@patch'], gets
+    first_get = trace.index { |row| row[1] == 'get' }
+    assert_operator(first_get, :<, trace.index { |row| row.include?('-race') })
+    setting('UPDATE_TOOLCHAIN', 'false')
+    checkpoint
+    succeeds('bump')
+    refute(trace.any? { |row| row[1] == 'get' })
+    assert_equal "1.2.5\n", File.read(File.join(@repo, 'VERSION'))
+  end
+
   def test_rejected_push_resumes_without_another_bump
     bare = add_remote
     hook = File.join(bare, 'hooks/pre-receive')

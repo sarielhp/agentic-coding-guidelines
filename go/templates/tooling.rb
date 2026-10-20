@@ -18,6 +18,64 @@ module Tooling
     Dir.chdir(File.realpath(File.expand_path('..', __dir__)))
     abort 'go.mod missing; adapt these tools in a Go repository' unless File.file?('go.mod')
     ENV['PATH'] = search_paths.join(File::PATH_SEPARATOR)
+    # go.mod decides the Go version: auto runs the newer of the local Go and
+    # the toolchain line, downloading it when needed. A GOTOOLCHAIN=local in
+    # the environment or in go env would quietly build with whatever is
+    # installed, and govulncheck then reports that Go's standard library.
+    ENV['GOTOOLCHAIN'] = 'auto'
+  end
+
+  # A settings constant, or default when a project's settings.rb predates it.
+  def setting(name, default)
+    ToolSettings.const_defined?(name) ? ToolSettings.const_get(name) : default
+  end
+
+  # The Go version go runs with here: under auto, the newer of the local
+  # installation and the go.mod toolchain line.
+  def go_version
+    run(executable('go'), 'env', 'GOVERSION').strip
+  end
+
+  # Moves the go.mod toolchain line to the latest patch of the Go in use, so a
+  # release builds with a standard library govulncheck accepts. A toolchain
+  # line below the local Go is ignored by auto, so the gate scanned whatever
+  # the machine had installed, and its advisories blocked every release until
+  # someone upgraded by hand.
+  def update_toolchain
+    return unless setting(:UPDATE_TOOLCHAIN, true)
+
+    running = go_version
+    return unless running.match?(/\Ago\d+\.\d+\.\d+\z/)
+
+    before = File.read('go.mod')
+    run(executable('go'), 'get', "toolchain@#{running}")
+    run(executable('go'), 'get', 'toolchain@patch')
+    return if File.read('go.mod') == before
+
+    puts "toolchain moved to #{go_version}; the full gate expects analyzers built with it (go-install-tools)"
+  end
+
+  # The Go that built an analyzer, from its embedded build information, or nil
+  # when it has none.
+  def analyzer_go_version(path)
+    out, _err, status = capture(executable('go'), 'version', '-m', path)
+    return nil unless status.success?
+
+    out.lines.first.to_s[/:\s+(go\d+\.\d+\.\d+)\s*\z/, 1]
+  end
+
+  # An analyzer built for another Go misreads this one's export data: gocritic
+  # once flagged every type assertion after a patch release. The full gate
+  # names the mismatch instead of reporting its symptoms.
+  def check_analyzer_toolchains
+    running = go_version
+    return unless running.match?(/\Ago\d+\.\d+\.\d+\z/)
+
+    stale = (%w[staticcheck] + DEEP_TOOLS).filter_map do |name|
+      built = analyzer_go_version(executable(name))
+      "#{name} (#{built})" if built && built != running
+    end
+    raise "analyzers built with another Go than #{running}: #{stale.join(', ')}; run go-install-tools" unless stale.empty?
   end
 
   def search_paths
@@ -152,6 +210,7 @@ module Tooling
   end
 
   def deep_review
+    check_analyzer_toolchains
     run(executable('govulncheck'), './...')
     out = run(executable('gocritic'), 'check', './...')
     raise "gocritic findings:\n#{out}" unless out.strip.empty?
@@ -302,6 +361,7 @@ module Tooling
     path, current = version
     raise 'bump requires a clean working tree; commit or snapshot first' unless git('status', '--porcelain').empty?
 
+    update_toolchain
     reuse = metadata_version? && verified?(metadata: true)
     updated = current.split('.').tap { |parts| parts[-1] = (parts[-1].to_i + 1).to_s }.join('.')
     File.write(state_path('release'), JSON.generate(base: head, version: updated, remote: remote, ref: ref))
