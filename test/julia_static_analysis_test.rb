@@ -116,6 +116,19 @@ class JuliaStaticAnalysisTest < Minitest::Test
     assert_match(/JET passed/, out)
   end
 
+  def test_git_ignored_files_are_not_analyzed
+    package("f(x::Int) = x\n")
+    system('git', 'init', '-q', @tmp)
+    FileUtils.mkdir_p(File.join(@tmp, 'scratch'))
+    write('.gitignore', "scratch/\n")
+    write('scratch/messy.jl', "f( x )=x+  1\n")
+    out, err, status = analyze('--format')
+    assert status.success?, "#{out}#{err}"
+    FileUtils.rm_f(File.join(@tmp, '.gitignore'))
+    _, _, status = analyze('--format')
+    refute status.success?
+  end
+
   def test_project_checks_need_a_project
     path = write('tidy.jl', "f(x) = x + 1\n")
     FileUtils.rm_f(File.join(@tmp, 'Project.toml'))

@@ -54,7 +54,21 @@ module AnalysisSupport
       next false if ignored?(path)
 
       File.extname(path) == '.jl' || julia_script?(path)
-    end
+    end.then { |files| reject_git_ignored(files) }
+  end
+
+  # Drops files that git ignores (scratch directories, generated output). Outside a
+  # git repository, or if git is unavailable, every file is kept.
+  def reject_git_ignored(files)
+    return files if files.empty?
+
+    out, _err, status = Open3.capture3('git', 'check-ignore', '-z', '--stdin', stdin_data: "#{files.join("\0")}\0")
+    return files unless status.exitstatus == 0 || status.exitstatus == 1
+
+    ignored = out.split("\0")
+    files.reject { |file| ignored.include?(file) }
+  rescue SystemCallError
+    files
   end
 
   # Nearest Julia project directory (the one holding Project.toml) above a path.
