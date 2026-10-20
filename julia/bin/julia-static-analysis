@@ -76,7 +76,7 @@ def main
   files = AnalysisSupport.julia_files(paths)
   abort 'no Julia sources found in requested paths' if files.empty?
 
-  root = AnalysisSupport.project_root(files.first)
+  root = AnalysisSupport.project_root(paths.first)
   single = paths.length == 1 && File.file?(paths.first)
   selected = default_checks(single, root) if selected.empty?
   raise "#{selected.join(', ')} need a project (Project.toml)" if root.nil? && selected.intersect?(%i[jet imports aqua])

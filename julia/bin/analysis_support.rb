@@ -59,7 +59,8 @@ module AnalysisSupport
 
   # Nearest Julia project directory (the one holding Project.toml) above a path.
   def project_root(path)
-    directory = File.dirname(File.expand_path(path))
+    expanded = File.expand_path(path)
+    directory = File.directory?(expanded) ? expanded : File.dirname(expanded)
     loop do
       return directory if File.file?(File.join(directory, 'Project.toml'))
       return nil if File.dirname(directory) == directory

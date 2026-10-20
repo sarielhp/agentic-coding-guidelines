@@ -106,6 +106,16 @@ class JuliaStaticAnalysisTest < Minitest::Test
     assert_match(/JET found/, err)
   end
 
+  def test_the_project_is_found_from_the_requested_directory_not_the_first_file
+    package("f(x::Int) = x\n")
+    FileUtils.mkdir_p(File.join(@tmp, 'docs'))
+    write('docs/Project.toml', "[deps]\n")
+    write('docs/make.jl', "println(1)\n")
+    out, err, status = analyze('--jet')
+    assert status.success?, "#{out}#{err}"
+    assert_match(/JET passed/, out)
+  end
+
   def test_project_checks_need_a_project
     path = write('tidy.jl', "f(x) = x + 1\n")
     FileUtils.rm_f(File.join(@tmp, 'Project.toml'))
