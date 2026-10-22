@@ -187,7 +187,9 @@ def scan_functions(lines, file_is_test, options)
 end
 
 go_files = Dir.glob(File.join(target_dir, '**', '*.go')).reject do |f|
-  f.include?('/.work/') || f.include?('/vendor/') || f.include?('/ruby/') || f.include?('/scripts/') || f.include?('/.git/')
+  # Judge the path below the audited directory, so a checkout under ~/ruby/ is still audited.
+  rel = f.delete_prefix("#{target_dir}/")
+  "/#{rel}".match?(%r{/(\.work|vendor|ruby|scripts|\.git)/})
 end.sort
 
 violations = []

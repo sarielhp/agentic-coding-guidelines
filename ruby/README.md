@@ -45,6 +45,12 @@ Interrupted releases retain `.git/tooling-release.json`. Inspect the failure and
 
 Set `TOOLS` overrides when an executable is not on PATH. Additional `FAST_CHECKS`, `FULL_CHECKS`, and `VERSION_UPDATE` commands are argument arrays. Freeze nested arrays as well as the outer array. Add ignored inputs to `VERIFICATION_INPUTS`; they participate in verification. Tool bootstrap remains a separate authorized step.
 
+## Known limitation: hybrid (Ruby and compiled) projects
+
+The lifecycle assumes one language. `ARTIFACTS` means executable Ruby sources that `tools/build` syntax-checks, and `tools/install` accepts only those. A project whose product is a compiled binary (for example a Go program with a Ruby reference tool) therefore cannot declare it: `tools/install` fails with `installation source is not declared`. Relatex hit this and patched its copied `tooling.rb` and `language.rb` locally with `defined?` guards for `BUILD_STEPS` and `NATIVE_ARTIFACTS`.
+
+Two designs were prototyped and deliberately not adopted, because hybrid projects are rare and both add permanent surface to every adopter: declared `BUILD_STEPS`/`NATIVE_ARTIFACTS` settings in the Ruby templates, and per-language toolsets in `tools/ruby/` and `tools/go/` behind shared stage runners. Until a second hybrid project exists, keep such a project's native build and install as a documented local divergence, and expect to re-apply it after each template sync. Gates for the other language can join through `FAST_CHECKS` and `FULL_CHECKS`.
+
 ## Migration from the old templates
 
 Replace the entry points together with their helpers; do not mix old and new script versions. Commits are local, bumps always perform full checks, and install targets must be declared. Bumps no longer install automatically. Use positional `major`/`minor`/`patch` instead of legacy flags, and use `release --install` only for an authorized installation. Release artifacts stay inside the repository until the explicit installer copies them.
