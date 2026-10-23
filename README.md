@@ -9,6 +9,10 @@
 
 Architectural guidelines, cognitive complexity boundaries, and automated quality gates designed specifically for **AI pair programming and autonomous coding agents** (Claude, Gemini, Cursor, Copilot, ChatGPT).
 
+For research papers, see the [LaTeX and mathematical writing standards](latex/README.md).
+They cover algorithm exposition, required LaTeX mechanics, mathematical figures,
+and a completion checklist with manual checks for definition visibility.
+
 ---
 
 ## The Problem: The AI Refactoring Trap
