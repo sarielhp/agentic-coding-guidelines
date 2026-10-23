@@ -4,8 +4,8 @@
 # Installs the analyzers the gates run, and rebuilds any that another Go
 # built. An analyzer reads the export data of the Go that runs it, and one
 # built for a different release misreads it: gocritic flagged every type
-# assertion after a patch release. Run it from the project, so that under
-# GOTOOLCHAIN=auto the Go is the one its go.mod names. --rebuild rebuilds all.
+# assertion after a patch release. Run it from the project: the Go it reports
+# there, from the go.mod toolchain, is the one the analyzers are built with. --rebuild rebuilds all.
 
 require 'open3'
 require 'tmpdir'
@@ -55,8 +55,14 @@ def built_with(path)
   ok ? out.lines.first.to_s[/:\s+(go\d+\.\d+\.\d+)\s*\z/, 1] : nil
 end
 
-def install(binary, pkg, dir)
+# GOTOOLCHAIN=auto reads the go.mod of the directory it runs in, but
+# `go install pkg@version` ignores the project's go.mod, and a scratch module
+# is initialised at the local Go. Either way the analyzer was built with the
+# system Go, not the one reported as in use, so it was never found current.
+# Naming the toolchain makes the build match what stale_reason compares with.
+def install(binary, pkg, dir, toolchain)
   env = { 'GOBIN' => dir }
+  env['GOTOOLCHAIN'] = toolchain unless toolchain.empty?
   return go('install', pkg, env: env) unless LATEST_DEPS.key?(binary)
 
   Dir.mktmpdir("#{binary}-build-") do |scratch|
@@ -100,7 +106,7 @@ def install_all(rebuild)
       next
     end
     puts "  Installing #{binary} (#{reason}) from #{pkg}..."
-    out, err, success = install(binary, pkg, path ? File.dirname(path) : install_dir)
+    out, err, success = install(binary, pkg, path ? File.dirname(path) : install_dir, running)
     report(binary, out, err, success)
     failed += 1 unless success
   end

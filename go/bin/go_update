@@ -1,0 +1,199 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Keeps the Go toolchain under ~/.go/sdk, so everything Go lives in ~/.go.
+#
+#   go_update             report the installed and the latest stable Go
+#   go_update --install   download, verify and switch to the latest stable Go
+#   go_update --install --tools   ...and rebuild gopls with it
+#
+# Each release is unpacked to ~/.go/sdk/goX.Y.Z, and ~/.go/sdk/current is a
+# symlink to the one in use: put ~/.go/sdk/current/bin on PATH once and it
+# never needs editing again. The tarball's SHA-256 is checked against the value
+# go.dev publishes before anything is unpacked. The previous release is kept
+# for rollback and older ones are removed. No root is needed.
+#
+# Exit status: 0 up to date or installed, 10 an update is available (report
+# mode), 1 on an error.
+
+require 'digest'
+require 'fileutils'
+require 'json'
+require 'net/http'
+require 'open3'
+require 'optparse'
+require 'rbconfig'
+require 'tmpdir'
+
+SDK = File.expand_path('~/.go/sdk')
+CURRENT = File.join(SDK, 'current')
+RELEASES_URL = URI('https://go.dev/dl/?mode=json')
+DOWNLOAD_BASE = 'https://go.dev/dl/'
+VERSION_DIR = /\Ago\d+\.\d+(\.\d+)?\z/
+ARCHES = { 'x86_64' => 'amd64', 'aarch64' => 'arm64', 'arm64' => 'arm64' }.freeze
+
+class UpdateError < StandardError; end
+
+def fetch(uri, limit = 5)
+  raise UpdateError, "too many redirects fetching #{uri}" if limit.zero?
+
+  response = Net::HTTP.get_response(uri)
+  return response.body if response.is_a?(Net::HTTPSuccess)
+  return fetch(URI(response['location']), limit - 1) if response.is_a?(Net::HTTPRedirection)
+
+  raise UpdateError, "#{uri}: HTTP #{response.code}"
+end
+
+def platform
+  arch = ARCHES.fetch(RbConfig::CONFIG['host_cpu']) { raise UpdateError, "unsupported CPU #{RbConfig::CONFIG['host_cpu']}" }
+  raise UpdateError, 'this script installs Linux toolchains only' unless RbConfig::CONFIG['host_os'].include?('linux')
+
+  ['linux', arch]
+end
+
+# The newest stable release and its archive for this machine.
+def latest_release
+  os, arch = platform
+  release = JSON.parse(fetch(RELEASES_URL)).find { |r| r['stable'] }
+  raise UpdateError, 'go.dev lists no stable release' unless release
+
+  file = release['files'].find { |f| f['os'] == os && f['arch'] == arch && f['kind'] == 'archive' }
+  raise UpdateError, "#{release['version']} has no #{os}/#{arch} archive" unless file
+
+  { version: release['version'], filename: file['filename'], sha256: file['sha256'] }
+end
+
+def installed_versions
+  Dir.children(SDK).grep(VERSION_DIR).sort_by { |v| v.scan(/\d+/).map(&:to_i) }
+rescue Errno::ENOENT
+  []
+end
+
+# The release `current` names, or the newest one unpacked when it is unset.
+def current_version
+  return File.basename(File.readlink(CURRENT)) if File.symlink?(CURRENT)
+
+  installed_versions.last
+end
+
+def release_numbers(version)
+  version.delete_prefix('go').split('.').map(&:to_i)
+end
+
+def newer?(latest, installed)
+  return true unless installed
+
+  (release_numbers(latest) <=> release_numbers(installed)) == 1
+end
+
+def jump_kind(latest, installed)
+  return 'new installation' unless installed
+
+  return 'patch release' if release_numbers(latest).first(2) == release_numbers(installed).first(2)
+
+  'new minor or major release: read the release notes'
+end
+
+def download(release, dir)
+  path = File.join(dir, release[:filename])
+  File.binwrite(path, fetch(URI(DOWNLOAD_BASE + release[:filename])))
+  actual = Digest::SHA256.file(path).hexdigest
+  return path if actual == release[:sha256]
+
+  raise UpdateError, "checksum mismatch for #{release[:filename]}: got #{actual}, want #{release[:sha256]}"
+end
+
+def run!(*cmd, env: {})
+  out, err, status = Open3.capture3(env, *cmd)
+  raise UpdateError, "#{cmd.join(' ')} failed: #{err.empty? ? out : err}" unless status.success?
+
+  out
+end
+
+# Unpacks the verified archive as SDK/<version>; the tarball's top directory is "go".
+def unpack(release, archive, scratch)
+  run!('tar', '-xzf', archive, '-C', scratch)
+  target = File.join(SDK, release[:version])
+  FileUtils.rm_rf(target)
+  FileUtils.mv(File.join(scratch, 'go'), target)
+  reported = run!(File.join(target, 'bin', 'go'), 'version')
+  raise UpdateError, "#{target} reports #{reported.strip}, not #{release[:version]}" unless reported.include?(release[:version])
+
+  target
+end
+
+# Points `current` at version without a moment when it names nothing.
+def switch_to(version)
+  staged = "#{CURRENT}.new"
+  FileUtils.rm_f(staged)
+  File.symlink(version, staged)
+  File.rename(staged, CURRENT)
+end
+
+# Keeps the release in use and the one before it, for rollback.
+def prune(keep)
+  (installed_versions - keep).each do |old|
+    puts "removing #{old}"
+    FileUtils.rm_rf(File.join(SDK, old))
+  end
+end
+
+def install(release)
+  previous = current_version
+  FileUtils.mkdir_p(SDK)
+  Dir.mktmpdir('go_update-', SDK) do |scratch|
+    puts "downloading #{release[:filename]}"
+    unpack(release, download(release, scratch), scratch)
+  end
+  switch_to(release[:version])
+  prune([release[:version], previous].compact)
+  puts "now using #{release[:version]} (#{CURRENT})"
+end
+
+def rebuild_tools(version)
+  go = File.join(SDK, version, 'bin', 'go')
+  puts 'rebuilding gopls'
+  run!(go, 'install', 'golang.org/x/tools/gopls@latest', env: { 'GOTOOLCHAIN' => version, 'GOFLAGS' => '' })
+  puts 'run `go-install-tools --rebuild` in each Go project to rebuild its linters'
+end
+
+def parse_options
+  options = { install: false, tools: false }
+  OptionParser.new do |o|
+    o.banner = 'Usage: go_update [--install [--tools]]'
+    o.on('--install', 'download and switch to the latest stable Go') { options[:install] = true }
+    o.on('--tools', 'rebuild gopls with the new Go (with --install)') { options[:tools] = true }
+  end.parse!
+  options
+end
+
+def report(release, installed)
+  puts "installed: #{installed || 'none'}"
+  puts "latest:    #{release[:version]}"
+  return puts('up to date') unless newer?(release[:version], installed)
+
+  puts "update available (#{jump_kind(release[:version], installed)}); run `go_update --install`"
+  exit 10
+end
+
+def main
+  options = parse_options
+  release = latest_release
+  installed = current_version
+  return report(release, installed) unless options[:install]
+
+  if newer?(release[:version], installed)
+    install(release)
+  else
+    switch_to(installed) unless File.symlink?(CURRENT)
+    puts "#{installed} is already the latest"
+  end
+  rebuild_tools(release[:version]) if options[:tools]
+end
+
+begin
+  main
+rescue UpdateError, SystemCallError, SocketError, OpenSSL::SSL::SSLError => e
+  warn "go_update: #{e.message}"
+  exit 1
+end
