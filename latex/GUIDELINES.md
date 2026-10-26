@@ -77,10 +77,23 @@ construction depends on the operation currently being explained.
   definition if the interpretation makes it easier to use.
 - **Required definition typography:** mark a key term being defined and used
   later with `\emphi{...}`, whether the definition is inline or in an environment.
-  Ordinary `\emph{...}` is insufficiently visible for the author. Use a prominent
-  implementation such as `\newcommand{\emphi}[1]{\textbf{\emph{#1}}}` in the
-  prefix; do not silently redefine it as ordinary italics. Keep ordinary emphasis
+  Ordinary `\emph{...}` and black bold italics do not implement the author's
+  convention. Use the colored, indexing definition from
+  `/home/sariel/papers/styles/sariel.sty`, reproduced below. Load that style or
+  copy the three definitions into `prefix.tex` with `xcolor`; do not substitute
+  the separate `\emphw` macro. Preserve the `\index` hook; producing a printed
+  index is a separate manuscript choice. Keep ordinary emphasis
   and proof headings as `\emph`; do not mark every later use of a defined term.
+
+  ```tex
+  \usepackage{xcolor}
+  \definecolor{blue25emph}{rgb}{0, 0, 11}
+  \newcommand{\emphic}[2]{\textcolor{blue25emph}{\textbf{\emph{#1}}}\index{#2}}
+  \newcommand{\emphi}[1]{\emphic{#1}{#1}}
+  ```
+
+  These are the literal color and macro definitions in `sariel.sty`. When
+  synchronizing them, consult that file rather than choosing a substitute color.
 - Use consistent names for distinct objects. Explain when multiple records or
   occurrences can represent the same geometric point. Avoid unnecessary indices
   and new terminology that do not support a later argument.
@@ -193,7 +206,8 @@ the stated assumptions. Finally review the source diff and compiled pages.
 
 **Manually audit definition visibility.** Read the defining occurrences of key
 concepts, including inline definitions, and check that they use `\emphi` in the
-source and are visibly prominent in the PDF. A formatter cannot reliably decide
+source and render with the specified color and bold italics in the PDF.
+A formatter cannot reliably decide
 which concepts are central, and a command search cannot establish that their
 definitions are complete or legible. Do not claim this check from automation alone.
 

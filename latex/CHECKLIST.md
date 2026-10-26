@@ -14,8 +14,9 @@ Report unavailable tools or blocked checks as incomplete, not as passes.
 - [ ] **References and conventions:** the convention checker ran; citations,
   typed references, label targets, and relevant diagnostics were checked.
 - [ ] **Definition visibility — manual:** defining occurrences of reused key
-  concepts, including inline definitions, use `\emphi`. Their appearance is
-  visibly prominent in the rendered PDF. Ordinary emphasis and later mentions
+  concepts, including inline definitions, use the `sariel.sty` version of
+  `\emphi`, with its color, bold italics, and index hook. Their appearance is
+  checked in the rendered PDF. Ordinary emphasis and later mentions
   have not been indiscriminately converted. Do not infer this result solely from
   formatter or search output.
 - [ ] **Build and pages:** the paper builds using its recorded workflow; relevant

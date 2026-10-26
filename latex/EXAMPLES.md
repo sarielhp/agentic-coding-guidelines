@@ -72,5 +72,7 @@ must specify the incidence conventions relevant to its geometry. By contrast,
 definition environment.
 
 If the exit definition is instead written inline, its defining occurrence must
-still use `\emphi{exit}`. Define `\emphi` prominently in the prefix, for example
-as `\textbf{\emph{#1}}`; plain `\emph{exit}` is not an acceptable substitute.
+still use `\emphi{exit}`. Use the `blue25emph`, `\emphic`, and `\emphi`
+definitions from `~/papers/styles/sariel.sty`, reproduced in Section 4 of
+`GUIDELINES.md`: colored bold italics with the index hook. Plain `\emph{exit}`,
+black bold italics, or the separate `\emphw` macro are not substitutes.

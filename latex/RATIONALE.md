@@ -98,8 +98,10 @@ structure. Build commands and page layouts remain project-specific.
 Definition typography also serves an explicit reader need: ordinary italics do
 not make a defining occurrence visible enough for this author. Therefore
 `\emphi{...}` is required for reused key concepts, even when the definition
-environment itself is optional. A bold-italic implementation is provided by the
-skill's prefix. This decision should not be weakened to an ordinary style preference.
+environment itself is optional. The author's colored bold-italic implementation,
+including its index hook, comes from `~/papers/styles/sariel.sty` and is copied
+into the skill's prefix. The separate dark-blue `\emphw` serves a different
+purpose. This decision should not be weakened to an ordinary style preference.
 
 Stable requirements belong here; executable steps belong in the skills and paper
 build instructions. This avoids conflicting copies of a command sequence when
