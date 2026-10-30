@@ -12,6 +12,8 @@ module Tooling
   VERSION = /\A(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\z/
   DEEP_TOOLS = %w[govulncheck gocritic shadow revive dupl].freeze
 
+  HELP_FLAGS = %w[-h --help].freeze
+
   module_function
 
   def setup
@@ -457,10 +459,28 @@ module Tooling
     raise "#{e.message}\n#{state}"
   end
 
-  def entry
+  # A script's help is printed, and nothing else happens, whenever -h or
+  # --help is among its arguments. The scripts took any lone argument as their
+  # commit message, so `tools/release --help` committed pending work as
+  # "--help", bumped the version and published the release.
+  def entry(help = nil)
+    if ARGV.intersect?(HELP_FLAGS)
+      puts help || "#{File.basename($PROGRAM_NAME)}: no help written for this script"
+      exit
+    end
     setup
     yield
   rescue StandardError => e
     abort e.message
+  end
+
+  # A commit message is what the commit is called for good once it is pushed,
+  # so one that looks like an option -- a mistyped --ful, a --dry-run the
+  # script does not have -- is refused rather than committed.
+  def commit_message(text)
+    raise 'the commit message is empty' if text.strip.empty?
+    raise "refusing a commit message that looks like an option: #{text}" if text.start_with?('-')
+
+    text
   end
 end

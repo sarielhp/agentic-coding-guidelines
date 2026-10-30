@@ -1,0 +1,31 @@
+# Copy or include; use tools/commit directly for messages with shell metacharacters.
+# tools/publish (registration in General) has no target on purpose: run it only when explicitly asked.
+.PHONY: all build gate check ci lint snapshot commit bump install release test audit review static-analysis
+all: build
+build:
+	tools/build
+gate:
+	tools/gate $(ARGS)
+check:
+	tools/check $(ARGS)
+ci:
+	tools/gate --full
+lint:
+	tools/lint
+snapshot:
+	tools/snapshot $(ARGS)
+commit:
+	tools/commit "$(msg)"
+bump:
+	tools/bump $(ARGS)
+install:
+	tools/install $(ARGS)
+release:
+	tools/release $(ARGS)
+test:
+	tools/test
+audit:
+	julia-audit --strict --quiet
+review: static-analysis
+static-analysis:
+	julia-static-analysis

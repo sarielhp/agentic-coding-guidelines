@@ -160,7 +160,16 @@ end
 def parse_options
   options = { install: false, tools: false }
   OptionParser.new do |o|
-    o.banner = 'Usage: go_update [--install [--tools]]'
+    o.banner = <<~TEXT.chomp
+      Usage: go_update [--install [--tools]]
+
+      Without options, report the installed and the latest stable Go and change
+      nothing; the exit status is 10 when an update is available.
+    TEXT
+    o.on('-h', '--help', 'show this help; nothing is run') do
+      puts o
+      exit
+    end
     o.on('--install', 'download and switch to the latest stable Go') { options[:install] = true }
     o.on('--tools', 'rebuild gopls with the new Go (with --install)') { options[:tools] = true }
   end.parse!

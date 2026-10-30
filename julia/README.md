@@ -42,7 +42,28 @@ julia-install-tools                # install into the tools environment (require
 3. Run `julia-audit --strict` and `julia-static-analysis`; fix findings or record justified `allow` markers.
 4. Put `Aqua.test_all` in the test suite.
 
-Lifecycle helpers (`tools/build`, `gate`, `commit`, `bump`, `release`, …) are not provided for Julia yet. Julia projects that register in General use the registry's own release flow.
+## Lifecycle templates
+
+`templates/` holds the same lifecycle helpers as the Ruby and Rust standards, on the same
+shared `tooling.rb` (kept byte-identical across the three), with Julia's specifics in
+`language.rb` and `settings.rb`: `build`, `gate`/`check`, `lint`, `test`, `snapshot`,
+`commit`, `bump`, `release`, `install`, and the Julia-only `publish`. Copy them into a
+project's `tools/`, dropping the `.rb` suffix except on `tooling.rb`, `language.rb` and
+`settings.rb`. Every script answers `-h`/`--help` and runs nothing.
+
+| Step | What it does |
+|---|---|
+| `tools/gate` | `julia-audit --strict`, `julia-static-analysis --syntax --format`, `Pkg.test()`, precompile; `--full` adds JET and ExplicitImports |
+| `tools/release <message>` | Commit, bump the version in `Project.toml`, run the full gate, push. Frequent; never registers |
+| `tools/publish [notes]` | Register the pushed release in General: wait for `PUBLISH_WORKFLOW` on the commit, then comment `@JuliaRegistrator register`. Rare, and only on explicit request |
+
+Releasing and registering are separate on purpose. A release only pushes a version; a
+registration is public and permanent. `RELEASE_TAG` is `false` by default because
+TagBot tags a registered package once its registration merges; set it to `true` for a
+project that is never registered, and the bump then pushes a `vX.Y.Z` tag itself.
+`GITHUB_REPO` (default: read from the upstream remote) and `PUBLISH_WORKFLOW` (default
+`CI.yml`) configure `tools/publish`. A package's executable scripts can be listed in
+`ARTIFACTS` to be checked by `tools/build` and copied by `tools/install`.
 
 ## Tests
 

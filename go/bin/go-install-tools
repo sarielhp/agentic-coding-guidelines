@@ -114,6 +114,23 @@ def install_all(rebuild)
   failed
 end
 
+HELP = <<~TEXT.freeze
+  Usage: go-install-tools [--rebuild]
+
+  Install the Go analyzers the gates run into GOBIN (else the first GOPATH's
+  bin, else ~/.go/bin), and rebuild any that a different Go built:
+    #{TOOLS.keys.join(', ')}
+  Run it from the project: the Go that go.mod selects there is the one they
+  are built with.
+
+  Options:
+    --rebuild   Rebuild every analyzer, not only the missing and stale ones.
+    -h, --help  Show this help; nothing is run.
+TEXT
+if ARGV.intersect?(%w[-h --help])
+  puts HELP
+  exit
+end
 abort 'Usage: go-install-tools [--rebuild]' unless ARGV.empty? || ARGV == ['--rebuild']
 ENV['PATH'] = search_paths.join(File::PATH_SEPARATOR)
 ENV['GOTOOLCHAIN'] ||= 'auto'

@@ -44,6 +44,11 @@ class ToolingFixture < Minitest::Test
       end
       File.write('Cargo.lock', "version #{version}\n") if ARGV.first == 'check' && !ARGV.include?('--locked')
     end
+    if tool == 'gh'
+      puts(ENV.fetch('GH_RUNS', '[{"databaseId":7}]')) if ARGV.first(2) == %w[run list]
+      abort 'CI run failed' if ARGV.first(2) == %w[run watch] && ENV['CI_FAIL'] == '1'
+      puts 'https://github.com/owner/Fixture.jl/commit/c#comments' if ARGV.first == 'api'
+    end
     if tool == 'flay'
       warn 'skipping file due to parser failure' if ENV['FLAY_SKIP'] == '1'
       puts "Total score (lower is better) = #{ENV.fetch('FLAY_SCORE', '0')}"
@@ -58,7 +63,7 @@ class ToolingFixture < Minitest::Test
     @env = fixture_environment
     copy_templates
     write('.gitignore', "/target/\n/.test-ran-*\n")
-    self.class::LANGUAGE == 'rust' ? initialize_rust : initialize_ruby
+    send(:"initialize_#{self.class::LANGUAGE}")
     git('init', '-b', 'main')
     git('config', 'user.name', 'Fixture')
     git('config', 'user.email', 'fixture@example.test')
@@ -79,7 +84,7 @@ class ToolingFixture < Minitest::Test
 
   def fixture_environment
     %w[git cargo rustc rust-audit cargo-audit cargo-deny cargo-machete ruby-audit rubocop bundle-audit flay
-       bundle].each do |tool|
+       bundle julia julia-audit julia-static-analysis gh].each do |tool|
       File.write(File.join(@bin, tool), "#!#{RbConfig.ruby}\n#{MOCK}")
       File.chmod(0o755, File.join(@bin, tool))
     end
@@ -111,6 +116,26 @@ class ToolingFixture < Minitest::Test
     File.chmod(0o755, File.join(@repo, 'bin/fixture'))
     write('.rubocop.yml', File.read(File.join(ROOT, 'ruby/templates/dot_rubocop.yml')))
     write('.ruby-version', "#{RUBY_VERSION}\n")
+  end
+
+  # A registered-package layout. RELEASE_TAG is turned on so the shared
+  # lifecycle contract, which checks the pushed tag, applies unchanged; the
+  # default (no tag, TagBot tags) is covered by the Julia language tests.
+  def initialize_julia
+    write('Project.toml', <<~TOML)
+      name = "Fixture"
+      uuid = "8f2b7c1e-1d4a-4c8e-9a3b-0f6e5d4c3b2a"
+      authors = ["Fixture"]
+      version = "1.2.3"
+
+      [compat]
+      julia = "1.10"
+    TOML
+    write('src/Fixture.jl', "module Fixture\nend\n")
+    write('bin/fixture', "#!/usr/bin/env julia\nprintln(\"fixture\")\n")
+    File.chmod(0o755, File.join(@repo, 'bin/fixture'))
+    setting('ARTIFACTS', "['bin/fixture'].freeze")
+    setting('RELEASE_TAG', 'true')
   end
 
   def write(path, content)
@@ -177,8 +202,19 @@ class ToolingFixture < Minitest::Test
     self.class::LANGUAGE == 'rust' ? 'target/release/fixture' : 'bin/fixture'
   end
 
+  AUDITORS = { 'rust' => 'rust-audit', 'ruby' => 'ruby-audit', 'julia' => 'julia-audit' }.freeze
+
+  def auditor
+    AUDITORS.fetch(self.class::LANGUAGE)
+  end
+
+  # A trace row that only the full gate's deep review produces.
+  def deep_review_row?(row)
+    %w[cargo-audit flay].include?(row.first) || (row.first == 'julia-static-analysis' && row.include?('--jet'))
+  end
+
   def current_version
-    file = self.class::LANGUAGE == 'rust' ? 'Cargo.toml' : 'bin/fixture'
+    file = { 'rust' => 'Cargo.toml', 'ruby' => 'bin/fixture', 'julia' => 'Project.toml' }.fetch(self.class::LANGUAGE)
     File.read(File.join(@repo, file))[/\d+\.\d+\.\d+/]
   end
 end

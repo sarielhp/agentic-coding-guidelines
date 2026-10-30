@@ -19,7 +19,7 @@ module LifecycleContract
     assert_match(/required entry point missing/, fails('commit', 'fix: test'))
     refute File.exist?(marker)
     copy_templates
-    analyzer = self.class::LANGUAGE == 'rust' ? 'rust-audit' : 'ruby-audit'
+    analyzer = auditor
     assert_match(/failed/, fails('commit', 'fix: test', env: { 'FAIL' => analyzer }))
     refute File.exist?(marker)
     setting('TOOLS', "{ #{analyzer.inspect} => '#{@tmp}/missing' }.freeze")
@@ -60,7 +60,7 @@ module LifecycleContract
     assert_equal sha, git('ls-remote', 'origin', 'refs/heads/main').split.first
     assert_equal sha, git('ls-remote', 'origin', 'refs/tags/v1.2.4^{}').split.first
     assert_empty git('ls-remote', 'origin', 'refs/tags/unrelated')
-    assert(trace.any? { |row| %w[cargo-audit flay].include?(row.first) })
+    assert(trace.any? { |row| deep_review_row?(row) })
     refute File.exist?(marker('release'))
   end
 
@@ -140,15 +140,15 @@ module LifecycleContract
 
   def test_gate_check_and_make_delegates_do_not_duplicate_work
     succeeds('gate')
-    expected = trace.count { |row| %w[rust-audit ruby-audit].include?(row.first) }
+    expected = trace.count { |row| row.first == auditor }
     reset_trace
     succeeds('check')
-    assert_equal(expected, trace.count { |row| %w[rust-audit ruby-audit].include?(row.first) })
+    assert_equal(expected, trace.count { |row| row.first == auditor })
     write('Makefile', File.read(File.join(ToolingFixture::ROOT, self.class::LANGUAGE, 'templates/Makefile.snippet')))
     reset_trace
     out, err, status = Open3.capture3(@env, 'make', 'check', chdir: @repo)
     assert status.success?, "#{out}#{err}"
-    assert_equal(1, trace.count { |row| %w[rust-audit ruby-audit].include?(row.first) })
+    assert_equal(1, trace.count { |row| row.first == auditor })
   end
 
   def test_ignored_inputs_invalidate_resume_verification
@@ -161,6 +161,27 @@ module LifecycleContract
     write('private-input', 'after')
     assert_match(/checked inputs changed/, fails('bump', '--resume'))
   end
+
+  # `tools/release --help` once committed pending work as "--help", bumped the
+  # version and pushed. Help must print and run nothing, wherever the flag sits;
+  # a message that looks like an option must be refused before anything runs.
+  def test_help_runs_nothing_and_option_like_messages_are_refused
+    write('change.txt', 'pending')
+    state = [git('rev-parse', 'HEAD'), git('status', '--porcelain')]
+    reset_trace
+    %w[release commit snapshot bump gate install lint test build check].each do |name|
+      %w[--help -h].each { |flag| assert_match(%r{\AUsage: tools/}, succeeds(name, flag)) }
+    end
+    assert_match(%r{\AUsage: tools/release}, succeeds('release', '--install', 'fix: real', '-h'))
+    assert_match(%r{\AUsage: tools/install}, succeeds('install', '--link', '--help'))
+    assert_empty trace, 'help ran a tool'
+    %w[release commit snapshot].each do |name|
+      assert_match(/looks like an option: --bogus/, fails(name, '--bogus'))
+    end
+    assert_match(/commit message is empty/, fails('commit', '  '))
+    refute(trace.any? { |row| %w[add commit push].include?(row[1]) }, 'a refused message reached git')
+    assert_equal state, [git('rev-parse', 'HEAD'), git('status', '--porcelain')]
+  end
 end
 
 class RustLifecycleTest < ToolingFixture
@@ -170,5 +191,10 @@ end
 
 class RubyLifecycleTest < ToolingFixture
   LANGUAGE = 'ruby'
+  include LifecycleContract
+end
+
+class JuliaLifecycleTest < ToolingFixture
+  LANGUAGE = 'julia'
   include LifecycleContract
 end

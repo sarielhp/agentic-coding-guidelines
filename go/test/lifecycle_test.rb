@@ -159,4 +159,24 @@ class LifecycleTest < ToolFixture
     fails('release', '--install', 'fix: failure', env: { 'FAIL_TOOL' => 'govulncheck' })
     refute(trace.any? { |row| row[1] == 'push' })
   end
+
+  # `tools/release --help` once committed pending work as "--help", bumped the
+  # version and pushed. Help must print and run nothing, wherever the flag sits;
+  # a message that looks like an option must be refused before anything runs.
+  def test_help_runs_nothing_and_option_like_messages_are_refused
+    write('change.txt', 'pending')
+    state = [command('rev-parse', 'HEAD'), command('status', '--porcelain')]
+    reset_trace
+    %w[release commit snapshot bump gate install lint build check].each do |name|
+      %w[--help -h].each { |flag| assert_match(%r{\AUsage: tools/}, succeeds(name, flag)) }
+    end
+    assert_match(%r{\AUsage: tools/release}, succeeds('release', '--install', 'fix: real', '-h'))
+    assert_empty trace, 'help ran a tool'
+    %w[release commit snapshot].each do |name|
+      assert_match(/looks like an option: --bogus/, fails(name, '--bogus'))
+    end
+    assert_match(/commit message is empty/, fails('commit', '  '))
+    refute(trace.any? { |row| %w[add commit push].include?(row[1]) }, 'a refused message reached git')
+    assert_equal state, [command('rev-parse', 'HEAD'), command('status', '--porcelain')]
+  end
 end

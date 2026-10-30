@@ -171,3 +171,90 @@ class RubyLanguageTest < ToolingFixture
     assert_match(/syntax check failed/, fails('build'))
   end
 end
+
+class JuliaLanguageTest < ToolingFixture
+  LANGUAGE = 'julia'
+
+  def gh_rows
+    trace.select { |row| row.first == 'gh' }
+  end
+
+  def publish_ready
+    add_remote if git('remote').strip.empty?
+    setting('GITHUB_REPO', "'owner/Fixture.jl'")
+    checkpoint
+    git('push', 'origin', 'main')
+    reset_trace
+  end
+
+  # Registration is public and permanent, so publish refuses anything but a
+  # clean, pushed package commit, and asks GitHub nothing before those checks.
+  def test_publish_refuses_before_contacting_github
+    assert_match(%r{\AUsage: tools/publish .*only when explicitly asked}m, succeeds('publish', '--help'))
+    assert_empty trace, 'publish --help ran a tool'
+    assert_match(/needs a branch with a pushed upstream/, fails('publish'))
+    add_remote
+    assert_match(/cannot tell the GitHub repository/, fails('publish'))
+    publish_ready
+    assert_match(/unknown option --bogus/, fails('publish', '--bogus'))
+    write('change.txt', 'dirty')
+    assert_match(/clean working tree/, fails('publish'))
+    checkpoint
+    assert_match(%r{is not the pushed refs/heads/main}, fails('publish'))
+    git('push', 'origin', 'main')
+    write('Project.toml', File.read(File.join(@repo, 'Project.toml')).sub(/^uuid.*\n/, ''))
+    checkpoint
+    git('push', 'origin', 'main')
+    assert_match(/only a package can be registered/, fails('publish'))
+    assert_empty gh_rows
+  end
+
+  def test_publish_dry_run_and_failed_ci_register_nothing
+    publish_ready
+    sha = git('rev-parse', 'HEAD').strip
+    assert_match(%r{Register owner/Fixture.jl 1.2.3 at #{sha}}, succeeds('publish', '--dry-run'))
+    assert_empty gh_rows
+    fails('publish', env: { 'CI_FAIL' => '1', 'PUBLISH_POLL_SECONDS' => '0' })
+    refute(gh_rows.any? { |row| row[1] == 'api' }, 'registered despite failed CI')
+    assert_match(/no CI.yml run/, fails('publish', env: { 'GH_RUNS' => '[]', 'PUBLISH_POLL_SECONDS' => '0' }))
+    refute(gh_rows.any? { |row| row[1] == 'api' })
+  end
+
+  def test_publish_comments_the_registration_on_the_pushed_commit
+    publish_ready
+    sha = git('rev-parse', 'HEAD').strip
+    out = succeeds('publish', 'Breaking:', 'new', 'API', env: { 'PUBLISH_POLL_SECONDS' => '0' })
+    assert_match(/Registration requested for 1.2.3/, out)
+    watch = gh_rows.find { |row| row[1..2] == %w[run watch] }
+    assert_equal ['--repo', 'owner/Fixture.jl', '--exit-status'], watch[4..6]
+    api = gh_rows.find { |row| row[1] == 'api' }
+    assert_equal "repos/owner/Fixture.jl/commits/#{sha}/comments", api[2]
+    assert_equal "body=@JuliaRegistrator register\n\nRelease notes:\nBreaking: new API", api[4]
+    refute(trace.any? { |row| row.first == 'git' && row[1] == 'push' }, 'publish pushed')
+  end
+
+  # TagBot tags a registered package after its registration merges, so the
+  # default bump pushes the branch alone.
+  def test_default_bump_pushes_no_tag_and_reads_only_the_top_level_version
+    setting('RELEASE_TAG', 'false')
+    write('Project.toml', File.read(File.join(@repo, 'Project.toml')) + "\n[extras]\nversion = \"9.9.9\"\n")
+    checkpoint
+    add_remote
+    succeeds('bump')
+    project = File.read(File.join(@repo, 'Project.toml'))
+    assert_match(/^version = "1.2.4"$/, project)
+    assert_match(/^version = "9.9.9"$/, project)
+    assert_equal git('rev-parse', 'HEAD').strip, git('ls-remote', 'origin', 'refs/heads/main').split.first
+    assert_empty git('ls-remote', '--tags', 'origin')
+    assert(trace.any? { |row| row.first == 'julia' && row.last.include?('Pkg.test()') })
+  end
+
+  def test_missing_top_level_version_and_scripts_stop_the_tools
+    write('Project.toml', File.read(File.join(@repo, 'Project.toml')).sub(/^version.*\n/, ''))
+    checkpoint
+    add_remote
+    assert_match(/no top-level version/, fails('bump'))
+    FileUtils.rm(File.join(@repo, 'bin/fixture'))
+    assert_match(/build artifact missing/, fails('build'))
+  end
+end

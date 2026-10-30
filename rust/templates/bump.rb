@@ -3,7 +3,27 @@
 
 require_relative 'tooling'
 
-Tooling.entry do
+HELP = <<~TEXT
+  Usage: tools/bump [major|minor|patch|--resume]
+
+  Release the committed tree. The working tree must be clean.
+
+    1. Raise the version (patch by default) and run VERSION_UPDATE.
+       Every fifth bump also runs BENCHMARK, every twentieth DEEP_TEST.
+    2. Run the full gate, commit "chore: bump version to X.Y.Z", and push the
+       branch and, when RELEASE_TAG is set, the vX.Y.Z tag atomically,
+       verified.
+
+  This changes the remote repository. Nothing is installed.
+
+  Options:
+    major, minor, patch  Which part of the version to raise.
+    --resume    Finish a bump that stopped partway, without bumping the
+                version again.
+    -h, --help  Show this help; nothing is run.
+TEXT
+
+Tooling.entry(HELP) do
   abort 'Usage: tools/bump [major|minor|patch|--resume]' unless ARGV.length <= 1 && (ARGV.empty? || %w[major minor patch
                                                                                                        --resume].include?(ARGV.first))
   ARGV.first == '--resume' ? Tooling.resume : Tooling.bump(ARGV.first || 'patch')

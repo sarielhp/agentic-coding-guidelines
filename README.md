@@ -87,7 +87,7 @@ agentic-coding-guidelines/
 │   │   ├── julia-checks.jl   # Julia-side runner for the static analyzers
 │   │   ├── analysis_support.rb # Required wrapper support
 │   │   └── julia-install-tools # Tools-environment auditor/installer (separately authorized)
-│   └── templates/            # AGENTS_SNIPPET.md and dot_JuliaFormatter.toml
+│   └── templates/            # Lifecycle tools (incl. publish: registration in General), AGENTS_SNIPPET.md, dot_JuliaFormatter.toml
 ├── rust/
 │   ├── README.md             # Rust quick reference & CLI usage
 │   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)

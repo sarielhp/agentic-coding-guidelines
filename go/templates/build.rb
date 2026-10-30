@@ -3,6 +3,16 @@
 
 require_relative 'tooling'
 
-Tooling.entry do
+HELP = <<~TEXT
+  Usage: tools/build
+
+  Build the declared artifacts into bin/. Nothing is installed.
+
+  Options:
+    -h, --help  Show this help; nothing is run.
+TEXT
+
+Tooling.entry(HELP) do
+  abort 'Usage: tools/build' unless ARGV.empty?
   Tooling.build
 end

@@ -3,7 +3,17 @@
 
 require_relative 'tooling'
 
-Tooling.entry do
+HELP = <<~TEXT
+  Usage: tools/build
+
+  Run cargo build --release and check that each artifact was built.
+  Nothing is installed.
+
+  Options:
+    -h, --help  Show this help; nothing is run.
+TEXT
+
+Tooling.entry(HELP) do
   abort 'Usage: tools/build' unless ARGV.empty?
   Language.build
 end

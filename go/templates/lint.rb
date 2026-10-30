@@ -3,7 +3,17 @@
 
 require_relative 'tooling'
 
-Tooling.entry do
+HELP = <<~TEXT
+  Usage: tools/lint
+
+  Static feedback only: go vet, staticcheck and go-audit --strict. No tests
+  and no build.
+
+  Options:
+    -h, --help  Show this help; nothing is run.
+TEXT
+
+Tooling.entry(HELP) do
   abort 'Usage: tools/lint' unless ARGV.empty?
   Tooling.lint
 end
