@@ -105,9 +105,27 @@ purpose. This decision should not be weakened to an ordinary style preference.
 
 Stable requirements belong here; executable steps belong in the skills and paper
 build instructions. This avoids conflicting copies of a command sequence when
-a tool changes. The completion checklist checks outcomes and explicitly includes
-a human reading of definitions, since formatting alone cannot determine their
-semantic role or visual prominence.
+a tool changes. The completion checklist checks outcomes and includes a semantic
+reading of definitions and targeted visual checks, since formatting alone cannot
+determine their meaning or prominence.
+
+**Inspection workflow revised at the author's request, October 30, 2026.**
+The version-63 triangulation rewrite exposed the cost of sending every changed
+page to a vision model: a whole-paper prose revision made the previous rule
+amount to an image review of all 68 pages. The revised rule separates complete
+textual reading from visual inspection. Source and extracted text support the
+former; compiler diagnostics and structured PDF data help select the latter.
+A local probe recovered a definition's actual font, blue color, and coordinates
+with `mutool` without rendering an image. This supports automated screening,
+not a claim that all layout or legibility problems are mechanically detectable.
+
+Changed figures and uncertain visual details still need inspection. Representative
+definition and layout checks retain that judgment while avoiding repeated images
+of ordinary prose. Global typography changes or recurring defects justify broader
+coverage. The selection depends on the change and findings, not a fixed page quota.
+Reports distinguish actual visual coverage from automated checks; sampling is not
+reported as a complete visual pass. This revision preserves the definition
+typography and mathematical figure requirements.
 
 A documented venue conflict should change only the affected requirement. This
 keeps a bibliography constraint from becoming an excuse to abandon formatting,

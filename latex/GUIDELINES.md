@@ -118,8 +118,9 @@ enforce a sentence-length quota or automatically replace grammatical phrases.
 Choose a figure to answer a specific question: what is adjacent, what changes,
 which side is selected, or why a case differs. Labels and orientations should
 match the text. Captions should say what the reader should notice. Keep labels
-readable at the actual printed size; inspect the rendered page. Retain editable
-sources, and do not rely on color alone to distinguish essential objects.
+readable at the actual printed size; inspect the figure as specified in Section 8.
+Retain editable sources, and do not rely on color alone to distinguish essential
+objects.
 
 ## 6. Required LaTeX mechanics
 
@@ -157,7 +158,8 @@ label identities. Follow explicit project build and page-layout instructions.
   current workflow, configuration, and file exclusions; command sequences belong
   in the skill, not in a second copy here.
 - Run the convention checks and the project's build. Fix broken citations and
-  references, inspect significant layout warnings, and inspect changed PDF pages.
+  references, inspect significant layout warnings, and perform the targeted PDF
+  checks in Section 8.
   If a tool is unavailable, report the unfinished check; hand formatting does
   not count as running it. Follow the completion checklist below.
 
@@ -187,29 +189,66 @@ skill and each figure's generator. The stable requirements are:
   newlines. Longer necessary explanations require the nearby source comment
   specified by the skill; this is a documented exception, not an automatic
   permission request. Do not evade the budget by moving text into the artwork.
-- Verify both nonempty artifacts, editable geometry, labels, and every rendered
-  figure page. When integrating, check the manuscript's references, final figure
-  size, and combined prose budget. Report unverified results accurately and keep
-  scratch files outside the figure directory.
+- Verify both nonempty artifacts, editable geometry, labels, and every new or
+  modified figure page. When integrating, check the manuscript's references,
+  final figure size, and combined prose budget. Report unverified results
+  accurately and keep scratch files outside the figure directory.
 
 The choice to include a figure remains a writing judgment. These instructions
 apply to figure work; they do not authorize adding figures during a discussion
 or a request for suggestions only.
 
-## 8. Final reading pass
+## 8. Final reading and efficient PDF checks
 
 Check that each algorithm's contract, procedure, correctness, and resource bound
 can be found without assembling fragments from several proofs. Check symbol
 definitions and the availability of every invoked structure. Follow overview
 references to ensure they lead to the promised details. Inspect examples against
-the stated assumptions. Finally review the source diff and compiled pages.
+the stated assumptions. Review prose and mathematics from the LaTeX source or
+appropriate extracted text; preserve mathematical notation when extracting it.
+Full textual coverage does not require full visual coverage. Do not routinely
+convert the whole paper to images or send every page to a vision model for a
+prose revision.
 
-**Manually audit definition visibility.** Read the defining occurrences of key
-concepts, including inline definitions, and check that they use `\emphi` in the
-source and render with the specified color and bold italics in the PDF.
-A formatter cannot reliably decide
-which concepts are central, and a command search cannot establish that their
-definitions are complete or legible. Do not claim this check from automation alone.
+**Screen the compiled document, then inspect selected regions.** Use compiler
+diagnostics, reference checks, and available structured PDF information to locate
+problems. Text positions, fonts, sizes, and colors can be inspected directly with
+tools such as `mutool`; text extraction can also check reading order and caption
+placement. Return compact findings to the reviewing agent rather than dumping
+the entire PDF's metadata into its context. Suspicious bounds, spacing, or overlap
+reports are candidates for inspection, not reliable verdicts on layout.
+
+Select visual checks according to the change and the diagnostic results:
+
+- Inspect each new or modified figure, including its labels and caption at the
+  final inclusion size. The figure-specific requirements in Section 7 remain.
+- Inspect regions implicated by unresolved diagnostics or ambiguous extraction,
+  and changed dense equations, tables, or pseudocode when their layout needs
+  visual judgment. Include enough surrounding text to assess the concern.
+- Inspect representative definition styles and affected page layouts. Broaden
+  the selection when fonts, macros, page geometry, or float settings change,
+  or when a sample reveals a recurring problem. A full visual pass is appropriate
+  when explicitly requested or when a concrete concern requires that coverage.
+- Render the needed PDF region directly when it suffices; use a full page when
+  page composition or reading order is at issue. Retain readable resolution.
+  Reuse inspections and renderings of unchanged content under unchanged layout
+  and rendering settings. Page numbers alone do not establish that a region is
+  unchanged after text has reflowed.
+
+**Audit definitions semantically and visually.** Read the defining occurrences
+of key concepts, including inline definitions, and check that the source uses
+the required `\emphi` implementation. A formatter cannot decide which concepts
+are central or whether their definitions make sense. Check the compiled font and
+color information where available, and visually inspect representative defining
+occurrences in each affected style or layout, plus any flagged or uncertain ones.
+This retains a manual legibility check without requiring an image of every
+definition or every changed page. Source markup alone does not establish the
+compiled appearance; metadata alone does not establish visual clarity.
+
+Record the automated checks and the pages or regions visually inspected. State
+coverage and unresolved concerns accurately; do not report sampled inspection
+as inspection of every page. Missing extraction capabilities may require broader
+visual checks, but do not automatically require a whole-paper image pass.
 
 Use [CHECKLIST.md](CHECKLIST.md) to record completion. Unavailable checks remain
 incomplete; checks outside the change's scope can be marked not applicable.
