@@ -16,25 +16,41 @@ from writing defaults and project-specific build/layout settings. It imposes no
 sentence-length quotas, theorem counts, compulsory pseudocode package, or
 automatic readability score.
 
-## Skill workflows
+## Standard tooling and workflows
 
-The standard defines stable requirements. The installed skills supply detailed
-commands, configurations, API guidance, and production workflows. They are
-external dependencies, not files in this repository. In the author's installation:
+The LaTeX standard is fully self-contained in this repository. All execution tools,
+configuration templates, and starter assets are provided locally:
 
-- `~/.codex/skills/latex-fix/SKILL.md` defines the LaTeX workflow; its
-  `assets/example/` directory contains the starter paper, prefix, bibliography,
-  and formatter configuration.
-- `~/.codex/skills/draw-figures/SKILL.md` defines the mathematical figure workflow.
+### Execution Tools (`tools/`)
+The standard tools are located in [tools/](tools/) and symlinked to `~/bin/`:
+- [tools/latex_fix_layout](tools/latex_fix_layout): Layout normalizer. Isolates math displays (`\[...\]`), multiline math (`\begin{math}...\end{math}`), and typed labels (`\lemlab{...}%`) on their own lines before formatting.
+- [tools/latex_indent](tools/latex_indent): Formatter and indenter using `tex-fmt`. The 4-space environment configuration is embedded directly into the script; copying `tex-fmt.toml` into project repositories is explicitly forbidden to prevent configuration drift.
+- [tools/latex_check_conventions](tools/latex_check_conventions): Read-only static convention auditor. Verifies typed labels, BibLaTeX/Biber, label line layout, and figure structure.
+- [tools/tex_source.rb](tools/tex_source.rb): Shared LaTeX parser that strips comments and protects verbatim/listing environments.
 
-Use the skill locations provided by the current environment when they differ.
+### Starter Templates (`templates/`)
+Starter manuscript sources and templates are maintained in [templates/](templates/):
+- [templates/example.tex](templates/example.tex): Minimal starter paper illustrating standard structure and environments.
+- [templates/prefix.tex](templates/prefix.tex): Shared prefix providing theorem definitions, `\emphi`, and typed reference macros.
+- [templates/references.bib](templates/references.bib): Sample BibLaTeX bibliography.
+- [templates/tex-fmt.toml](templates/tex-fmt.toml): Reference copy of the standard `tex-fmt` configuration.
+- [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md): Instructions snippet for adopting projects.
 
-In particular, run the layout normalizer and `tex-fmt` on revised manuscript
-sources. Mark definitions of reused key concepts with `\emphi{...}`; ordinary
+### Mathematical Figure Workflow
+For mathematical figures, follow Section 7 using the `draw-figures` workflow (generating matching vector PDF, editable Ipe, and reproducible Julia source).
+
+In particular, run the layout normalizer (`tools/latex_fix_layout`), reindent revised manuscript
+sources with `tools/latex_indent`, and run the convention checker (`tools/latex_check_conventions`).
+For reindentation, projects must copy the `tools/latex_indent` script from this repository directly
+and use it; copying `tex-fmt.toml` into project repositories is explicitly forbidden to prevent
+configuration drift. The standard formatter configuration is embedded directly in `tools/latex_indent`
+(and stored in `templates/tex-fmt.toml`).
+Mark definitions of reused key concepts with `\emphi{...}`; ordinary
 `\emph{...}` is not visually prominent enough for this purpose.
 
-The skill scripts are reused, not copied or replaced. Builds follow the target
-paper's instructions. Compiling and checking conventions do not verify a proof.
+The standard tools (`latex_fix_layout`, `latex_indent`, and `latex_check_conventions`) in `tools/`
+are reused directly. Builds follow the target paper's instructions. Compiling and checking conventions
+do not verify a proof.
 
 For genuine venue or project conflicts, follow the narrow-exception procedure in
 [GUIDELINES.md](GUIDELINES.md#9-resolve-genuine-convention-conflicts-narrowly).

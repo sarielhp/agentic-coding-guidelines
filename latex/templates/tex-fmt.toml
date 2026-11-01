@@ -1,0 +1,10 @@
+# Match the paper's four-space environment indentation while leaving
+# top-level document commands flush left.
+tabsize = 4
+tabchar = "space"
+no-indent-envs = ["document"]
+
+# Preserve the paper's hand-chosen paragraph and display line breaks,
+# including separate label and math delimiter lines. Run fix_tex_layout.rb
+# first; tex-fmt indents those lines after they are present in the source.
+wrap = false

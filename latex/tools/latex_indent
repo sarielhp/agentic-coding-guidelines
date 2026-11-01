@@ -1,0 +1,180 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'English'
+require 'etc'
+require 'fileutils'
+
+# Format LaTeX sources with tex-fmt using an embedded standard configuration.
+module LatexIndent
+  VERSION = '0.1.0'
+
+  EMBEDDED_CONFIG = <<~TOML
+    # Match the paper's four-space environment indentation while leaving
+    # top-level document commands flush left.
+    tabsize = 4
+    tabchar = "space"
+    no-indent-envs = ["document"]
+
+    # Preserve the paper's hand-chosen paragraph and display line breaks,
+    # including separate label and math delimiter lines. Run fix_tex_layout.rb
+    # first; tex-fmt indents those lines after they are present in the source.
+    wrap = false
+  TOML
+
+  module_function
+
+  def tex_fmt_available?
+    ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).any? do |dir|
+      bin = File.join(dir, 'tex-fmt')
+      File.file?(bin) && File.executable?(bin)
+    end
+  end
+
+  def current_username
+    Etc.getlogin || ENV['USER'] || ENV['LOGNAME'] || 'user'
+  rescue StandardError
+    ENV['USER'] || ENV['LOGNAME'] || 'user'
+  end
+
+  def cached_config_path
+    dir = File.join('/tmp', current_username, 'latex_indent')
+    FileUtils.mkdir_p(dir)
+    cache_path = File.join(dir, 'tex-fmt.toml')
+    File.write(cache_path, EMBEDDED_CONFIG) unless File.file?(cache_path) && File.read(cache_path) == EMBEDDED_CONFIG
+    cache_path
+  end
+
+  def resolve_config
+    return ENV['LATEX_INDENT_CONFIG'] if ENV['LATEX_INDENT_CONFIG'] && File.file?(ENV['LATEX_INDENT_CONFIG'])
+
+    cached_config_path
+  end
+
+  def write_config_file(target_path = 'tex-fmt.toml')
+    File.write(target_path, EMBEDDED_CONFIG)
+    puts "Wrote tex-fmt configuration to #{target_path}"
+    0
+  end
+
+  def excluded_path?(path)
+    base = File.basename(path)
+    return true if base == 'prefix.tex'
+
+    parts = path.split(File::SEPARATOR)
+    parts.include?('figs') || parts.any? { |part| part.start_with?('.') && part != '.' && part != '..' }
+  end
+
+  def default_tex_files
+    Dir.glob('**/*.tex').reject { |path| excluded_path?(path) }.sort
+  end
+
+  def show_help
+    puts <<~HELP
+      latex_indent v#{VERSION} - Standard LaTeX indentation tool using tex-fmt
+
+      PART OF THE LATEX STANDARD:
+        Standards Root: /home/sariel/prog/standards/latex
+        Guidelines:     /home/sariel/prog/standards/latex/GUIDELINES.md
+        Checklist:      /home/sariel/prog/standards/latex/CHECKLIST.md
+
+      DESCRIPTION:
+        Formats and reindents LaTeX manuscript files using tex-fmt with the
+        author-approved standard configuration. Indents environments with 4 spaces,
+        leaves top-level document commands flush left, and preserves manual paragraph
+        and display breaks.
+
+        To avoid configuration drift, the tex-fmt configuration is embedded directly
+        within this script. Copying tex-fmt.toml into project repositories is explicitly
+        forbidden; projects should copy or link this tool directly.
+
+        Typically run immediately after latex_fix_layout, which isolates delimiter lines
+        so tex-fmt can indent them cleanly.
+
+      USAGE:
+        latex_indent [OPTIONS] [FILE.tex ...]
+
+      OPTIONS:
+        -c, --check               Check formatting without modifying files (exit 1 if changes needed)
+        -p, --print               Print formatted result to stdout; do not modify files
+        -f, --fail-on-change      Format files in-place and exit non-zero if any file was changed
+        -v, --verbose             Show verbose formatting diagnostics
+        -q, --quiet               Suppress warning messages
+            --write-config [PATH] Write the embedded tex-fmt.toml to PATH (default: ./tex-fmt.toml)
+        -V, --version             Print script version and exit
+        -h, --help                Show this extended help message
+
+      FILE SELECTION & EXCLUSIONS:
+        If no files are specified, all manuscript *.tex files in the current directory
+        tree are formatted, automatically excluding:
+          - prefix.tex (macro and package configuration)
+          - figs/      (figure sources and generated artifacts)
+          - .*         (hidden files and directories)
+    HELP
+    0
+  end
+
+  def partition_args(argv)
+    options = []
+    files = []
+    argv.each do |arg|
+      if arg.start_with?('-')
+        options << arg
+      else
+        files << arg
+      end
+    end
+    [options, files]
+  end
+
+  def handle_write_config(argv)
+    inline = argv.find { |arg| arg.start_with?('--write-config=') }
+    if inline
+      dest = inline.split('=', 2).last
+      return write_config_file(dest.empty? ? 'tex-fmt.toml' : dest)
+    end
+
+    idx = argv.index('--write-config')
+    return nil unless idx
+
+    dest = argv[idx + 1] && !argv[idx + 1].start_with?('-') ? argv[idx + 1] : 'tex-fmt.toml'
+    write_config_file(dest)
+  end
+
+  def handle_early_exit(argv)
+    if argv.include?('-h') || argv.include?('--help')
+      show_help
+    elsif argv.include?('-V') || argv.include?('--version')
+      puts "latex_indent #{VERSION}"
+      0
+    elsif argv.any? { |arg| arg == '--write-config' || arg.start_with?('--write-config=') }
+      handle_write_config(argv)
+    end
+  end
+
+  def execute_formatter(options, targets)
+    abort 'Error: tex-fmt is not installed or not in PATH.' unless tex_fmt_available?
+
+    config = resolve_config
+    cmd = ['tex-fmt', '--config', config] + options + targets
+    system(*cmd)
+    $CHILD_STATUS.exitstatus || 1
+  end
+
+  def run(argv)
+    early_exit = handle_early_exit(argv)
+    return early_exit if early_exit
+
+    options, files = partition_args(argv)
+    targets = files.empty? ? default_tex_files : files
+
+    if targets.empty? && !options.include?('-s') && !options.include?('--stdin')
+      warn 'No .tex files found to format.'
+      return 0
+    end
+
+    execute_formatter(options, targets)
+  end
+end
+
+exit LatexIndent.run(ARGV) if __FILE__ == $PROGRAM_NAME

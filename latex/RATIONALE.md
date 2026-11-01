@@ -13,8 +13,8 @@ description separate from its analysis; correctness usually before running time;
 headings only for long, complicated procedures; informative section openings;
 and concise treatment of standard constructions. The author subsequently asked
 to review which conventions should be optional, and approved flexible writing
-defaults while requiring the mechanics in `latex-fix`. In particular, source
-reindentation and `\emphi{...}` for reused key concepts are requirements.
+defaults while requiring the mechanical conventions of this standard. In particular,
+source reindentation and `\emphi{...}` for reused key concepts are requirements.
 The author also endorsed using `draw-figures` for figure work.
 
 **Knuth, Larrabee, and Roberts, Mathematical Writing.** Consulted the available
@@ -53,11 +53,11 @@ programming-language detail. Consulted the section in the
 The present standard follows the author's preferred analysis order, rather than
 requiring the order of that textbook.
 
-**Existing latex-fix skill.** Source organization, typed references, bibliography
-tools, formatter/checker usage, and definition typography come from the
-[local skill](README.md#skill-workflows), not from the writing
-report. The separation of mathematical scope from mechanical validation is an
-explicit design choice of this standard.
+**Self-contained LaTeX tooling.** Source organization, typed references, bibliography
+tools, formatter/checker usage, and definition typography are provided directly by
+the tools in [`tools/`](README.md#standard-tooling-and-workflows) and templates in
+[`templates/`](templates/). The separation of mathematical scope from mechanical
+validation is an explicit design choice of this standard.
 
 **Existing draw-figures skill.** The Julia/Ipe production workflow, matching
 editable/vector artifacts, mathematical labels, visual inspection, and combined
@@ -99,15 +99,15 @@ Definition typography also serves an explicit reader need: ordinary italics do
 not make a defining occurrence visible enough for this author. Therefore
 `\emphi{...}` is required for reused key concepts, even when the definition
 environment itself is optional. The author's colored bold-italic implementation,
-including its index hook, comes from `~/papers/styles/sariel.sty` and is copied
-into the skill's prefix. The separate dark-blue `\emphw` serves a different
+including its index hook, comes from `~/papers/styles/sariel.sty` and is provided
+in the standard prefix (`templates/prefix.tex`). The separate dark-blue `\emphw` serves a different
 purpose. This decision should not be weakened to an ordinary style preference.
 
-Stable requirements belong here; executable steps belong in the skills and paper
-build instructions. This avoids conflicting copies of a command sequence when
-a tool changes. The completion checklist checks outcomes and includes a semantic
-reading of definitions and targeted visual checks, since formatting alone cannot
-determine their meaning or prominence.
+Stable requirements belong here; executable steps are supplied directly by the
+package tools (`tools/latex_fix_layout`, `tools/latex_indent`, `tools/latex_check_conventions`)
+and target paper build instructions. The completion checklist checks outcomes and
+includes a semantic reading of definitions and targeted visual checks, since formatting
+alone cannot determine their meaning or prominence.
 
 **Inspection workflow revised at the author's request, October 30, 2026.**
 The version-63 triangulation rewrite exposed the cost of sending every changed

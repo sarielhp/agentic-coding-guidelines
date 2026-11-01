@@ -12,10 +12,13 @@ global settings automatically.
   judgment; they do not require a permission request for each exception.
 - Prefer input/output, algorithm, correctness, then running time. Use headings
   only for long, complicated descriptions. Keep standard constructions concise.
-- Apply `latex-fix`: shared prefix, typed references, BibLaTeX/Biber, label and
-  math layout, required normalization and `tex-fmt` reindentation, and the
-  convention checker. Use `\emphi{...}` when defining reused key concepts;
-  ordinary `\emph{...}` is not sufficiently visible for this purpose.
+- Apply the LaTeX standard tooling: normalize math delimiters and labels with
+  `latex_fix_layout`, reindent with `latex_indent` (copy
+  `/home/sariel/prog/standards/latex/tools/latex_indent` to `tools/latex_indent`
+  and use it directly; copying `tex-fmt.toml` into project repositories is
+  explicitly forbidden), and audit compliance with `latex_check_conventions`.
+  Use `\emphi{...}` when defining reused key concepts; ordinary `\emph{...}` is
+  not sufficiently visible for this purpose.
 - Use `draw-figures` for mathematical figure work, including its Julia/Ipe/PDF
   artifacts, regeneration, label, caption-budget, and inspection requirements.
 - Follow the paper's recorded build command. Distinguish mechanical checks,
@@ -26,7 +29,7 @@ global settings automatically.
   checks of changed figures, flagged regions, and representative layouts.
   Do not routinely render or inspect every page image after prose edits.
   Record actual coverage. Follow the narrow-conflict procedure
-  in `GUIDELINES.md`; keep detailed tool commands in the skills and project notes.
+  in `GUIDELINES.md`; keep detailed tool commands in project notes and standard tools.
 ```
 
 Record the paper's actual main file, build command, auxiliary location, and

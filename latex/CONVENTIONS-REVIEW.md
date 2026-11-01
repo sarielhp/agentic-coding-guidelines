@@ -1,7 +1,7 @@
 # Review of required and optional conventions
 
 Decision record, October 23, 2026. The author approved flexible higher-level
-writing guidance and required the low-level conventions of `latex-fix`, especially
+writing guidance and required the low-level LaTeX conventions, especially
 reindentation and prominent definition typography. Use `draw-figures` for
 mathematical figure work. Explicit user and project instructions still apply.
 
@@ -24,10 +24,10 @@ to change a working manuscript gratuitously.
 | Key concepts in definition environments | Default for central, reused concepts | Define local notation inline. Do not create a separate environment for every variable. |
 | A running example and figures | Recommended when they reduce abstraction | They are not mandatory for a short or already transparent argument. |
 | Explain familiar constructions briefly | Default | Expand only the nonstandard detail needed for correctness or cost. |
-| Shared prefix, typed references, BibLaTeX/Biber, separate figure files | Requirement under this standard | Follow `latex-fix`; these mechanics are not optional writing preferences. Preserve explicit project instructions and mathematical content. |
-| Layout normalization and reindentation with `tex-fmt` | Requirement | Run the tools on revised manuscript sources with the skill's exclusions, then review the diff. A short edit is not a reason to skip formatting. |
+| Shared prefix, typed references, BibLaTeX/Biber, separate figure files | Requirement under this standard | Follow the standard prefix (`templates/prefix.tex`); these mechanics are not optional writing preferences. Preserve explicit project instructions and mathematical content. |
+| Layout normalization and reindentation with `tex-fmt` | Requirement | Run `tools/latex_fix_layout` to normalize delimiters and labels, then copy `tools/latex_indent` from the standards repository and use it directly on revised manuscript sources with the standard exclusions (`prefix.tex`, `figs/`). Copying `tex-fmt.toml` into the project repository is explicitly forbidden. Review the diff. A short edit is not a reason to skip formatting. |
 | `\emphi{...}` when defining reused key concepts | Requirement of special importance | The author needs more visible definition typography than ordinary `\emph{...}`. Use it for defining occurrences, including inline definitions. |
-| Label placement, reference helpers, and math-delimiter layout | Requirement | Apply the low-level `latex-fix` conventions consistently and run its checker. |
+| Label placement, reference helpers, and math-delimiter layout | Requirement | Apply the low-level conventions consistently and run `tools/latex_check_conventions`. |
 | Figure production and integration | Apply `draw-figures` when creating or revising mathematical figures | Follow its artifact, reproducibility, label, caption-budget, and inspection requirements. The decision to add a figure remains contextual. |
 | `\usepackage[in]{fullpage}` | Project choice | Required in the current triangulation drafts; do not override a venue's mandated layout. |
 | `latexmk -norc`, build wrapper, and auxiliary location | Project choice | Follow the paper's recorded build command. This repository's temporary-file rules still apply. |

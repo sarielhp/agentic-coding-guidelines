@@ -8,11 +8,12 @@ Report unavailable tools or blocked checks as incomplete, not as passes.
 - [ ] **Algorithm exposition:** affected procedures have clear inputs, outputs,
   steps, correctness arguments, and resource bounds at the intended level of
   detail. Referenced structures are available when used.
-- [ ] **Required source formatting:** the `latex-fix` normalization and `tex-fmt`
-  workflow ran with its prescribed configuration and exclusions. The diff was
-  inspected for unintended mathematical or typographic changes.
-- [ ] **References and conventions:** the convention checker ran; citations,
-  typed references, label targets, and relevant diagnostics were checked.
+- [ ] **Required source formatting:** the normalization (`tools/latex_fix_layout`)
+  and `tex-fmt` workflow ran using `tools/latex_indent` (copied directly from standards;
+  copying `tex-fmt.toml` is explicitly forbidden) with its prescribed exclusions. The
+  diff was inspected for unintended mathematical or typographic changes.
+- [ ] **References and conventions:** the convention checker (`tools/latex_check_conventions`)
+  ran; citations, typed references, label targets, and relevant diagnostics were checked.
 - [ ] **Definition visibility:** defining occurrences of reused key concepts
   were read for meaning and checked for the `sariel.sty` version of `\emphi`,
   including its color, bold italics, and index hook. Compiled font/color data
@@ -38,5 +39,7 @@ Report unavailable tools or blocked checks as incomplete, not as passes.
   concerns. Do not present sampled visual checks as a complete visual pass or
   claim a proof was verified by a successful build.
 
-Exact commands, tool configuration, and production steps belong in the skills
-and the project's build instructions. Do not maintain a competing workflow here.
+Exact commands, tool configurations, and production steps are provided by the
+repository tools ([`tools/latex_fix_layout`](tools/latex_fix_layout), [`tools/latex_indent`](tools/latex_indent),
+[`tools/latex_check_conventions`](tools/latex_check_conventions)) and the project's build instructions.
+Do not maintain a competing workflow here.

@@ -1,0 +1,164 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+begin
+  require_relative 'tex_source'
+rescue LoadError
+  fallback = '/home/sariel/prog/standards/latex/tools/tex_source.rb'
+  require fallback if File.file?(fallback)
+end
+
+# Read-only checks for conventions that can be verified without compiling TeX.
+module LatexCheckConventions
+  VERSION = '0.1.0'
+
+  RAW_REFERENCE = /\\(?:label|ref|eqref)\*?(?=\s*\{)/
+  TYPED_LABEL = /\\[A-Za-z@]+lab\{[^{}]*\}/
+  MATH_BOUNDARY = /\\\[|\\\]|\\begin\{math\}|\\end\{math\}/
+  DOLLAR_DISPLAY = /\$\$/
+  TIKZ_PICTURE = /\\begin\{tikzpicture\}/
+  BIBTEX_COMMAND = /\\(?:bibliographystyle|bibliography)\s*\{/
+  FIGURE = /\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}/
+  BEGIN_ENV = /\\begin\{([^}]+)\}/
+  END_ENV = /\\end\{([^}]+)\}/
+
+  module_function
+
+  def matches(code, pattern)
+    code.to_enum(:scan, pattern).filter_map do
+      match = Regexp.last_match
+      match unless TexSource.escaped?(code, match.begin(0))
+    end
+  end
+
+  def line_issues(code)
+    issues = []
+    issues << 'direct label/ref command' if matches(code, RAW_REFERENCE).any?
+    issues << 'BibTeX command' if matches(code, BIBTEX_COMMAND).any?
+    issues << 'use \\[...\\] instead of $$...$$' if matches(code, DOLLAR_DISPLAY).any?
+    issues << 'TikZ picture belongs in figs/ as a PDF' if matches(code, TIKZ_PICTURE).any?
+    matches(code, MATH_BOUNDARY).each do |match|
+      issues << "#{match[0]} must occupy its own line" unless code.strip == match[0]
+    end
+    matches(code, TYPED_LABEL).each do |match|
+      issues << 'typed label must occupy its own line' unless code.strip == match[0]
+    end
+    matches(code, FIGURE).each do |match|
+      issues << 'figure path must start with figs/' unless match[1].match?(%r{\A(?:\./)?figs/})
+    end
+    issues
+  end
+
+  def environment_issues(code, lines, index, stack)
+    issues = []
+    begin_match = matches(code, BEGIN_ENV).first
+    stack << [begin_match[1], index] if begin_match
+
+    if matches(code, TYPED_LABEL).any? && stack.any? && stack.last[0] != 'document'
+      issues << 'environment label must be its first interior line' unless index == stack.last[1] + 1
+      issues << 'environment label line must end with %' unless lines[index].rstrip.end_with?('%')
+      issues << 'environment label needs a following line containing only %' unless lines[index + 1]&.strip == '%'
+    end
+
+    end_match = matches(code, END_ENV).first
+    stack.pop if end_match && stack.last&.first == end_match[1]
+    issues
+  end
+
+  def check(path)
+    lines = File.readlines(path)
+    protected_lines = TexSource.protected_lines(lines.join)
+    stack = []
+    lines.each_with_index.flat_map do |line, index|
+      next [] if protected_lines[index]
+
+      code, = TexSource.code_and_comment(line)
+      issues = line_issues(code) + environment_issues(code, lines, index, stack)
+      issues.map { |issue| "#{path}:#{index + 1}: #{issue}" }
+    end
+  end
+
+  def excluded_path?(path)
+    base = File.basename(path)
+    return true if base == 'prefix.tex'
+
+    parts = path.split(File::SEPARATOR)
+    parts.include?('figs') || parts.any? { |part| part.start_with?('.') && part != '.' && part != '..' }
+  end
+
+  def default_tex_files
+    Dir.glob('**/*.tex').reject { |path| excluded_path?(path) }.sort
+  end
+
+  def show_help
+    puts <<~HELP
+      latex_check_conventions v#{VERSION} - Check LaTeX manuscript sources for convention violations
+
+      PART OF THE LATEX STANDARD:
+        Standards Root: /home/sariel/prog/standards/latex
+        Guidelines:     /home/sariel/prog/standards/latex/GUIDELINES.md
+        Checklist:      /home/sariel/prog/standards/latex/CHECKLIST.md
+
+      DESCRIPTION:
+        Performs read-only convention audits on LaTeX manuscript source files without
+        requiring a full TeX compilation. Directly verifies items required by the
+        completion checklist (CHECKLIST.md).
+
+        Checks performed:
+          1. Direct label/ref primitives: Flags raw \\label, \\ref, \\eqref (requires typed
+             helpers such as \\lemlab/\\lemref, \\seclab/\\secref, \\eqlab/\\Eqref).
+          2. BibLaTeX vs. BibTeX: Flags \\bibliographystyle and \\bibliography (requires
+             BibLaTeX with Biber: \\addbibresource, \\printbibliography).
+          3. Math delimiters: Flags $$...$$ (requires \\[...\\]) and verifies math boundaries
+             occupy their own lines.
+          4. Label placement: Verifies typed labels occupy their own line, are placed as the
+             first interior line of labeled environments, end in %, and are followed by a % line.
+          5. Figure structure: Verifies figure paths point to figs/ and flags raw tikzpicture
+             environments embedded directly in manuscripts (requires separate PDF figures).
+
+        Ignores verbatim/listings/minted blocks and comment lines via tex_source.rb.
+
+      USAGE:
+        latex_check_conventions [OPTIONS] [FILE.tex ...]
+
+      OPTIONS:
+        -V, --version     Print script version and exit
+        -h, --help        Show this extended help message
+
+      FILE SELECTION & EXCLUSIONS:
+        If no files are specified, all manuscript *.tex files in the current directory
+        tree are checked, automatically excluding:
+          - prefix.tex (macro definitions and preamble setup)
+          - figs/      (figure sources and generated artifacts)
+          - .*         (hidden files and directories)
+
+      EXIT STATUS:
+        0 if no convention violations were found.
+        1 if any violations were reported.
+    HELP
+    0
+  end
+
+  def run(argv)
+    return show_help if argv.include?('-h') || argv.include?('--help')
+
+    if argv.include?('-V') || argv.include?('--version')
+      puts "latex_check_conventions #{VERSION}"
+      return 0
+    end
+
+    targets = argv.reject { |arg| arg.start_with?('-') }
+    targets = default_tex_files if targets.empty?
+
+    if targets.empty?
+      puts 'No .tex files found to check.'
+      return 0
+    end
+
+    issues = targets.flat_map { |path| check(path) }
+    puts issues.empty? ? 'No convention violations found.' : issues.join("\n")
+    issues.empty? ? 0 : 1
+  end
+end
+
+exit LatexCheckConventions.run(ARGV) if __FILE__ == $PROGRAM_NAME

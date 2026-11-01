@@ -1,0 +1,36 @@
+\documentclass[12pt]{article}
+\input{prefix}%
+\addbibresource{references.bib}%
+
+\title{Sample Paper}
+\author{Author Name}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+    This small paper demonstrates the source conventions.
+\end{abstract}
+
+\section{Introduction}
+\seclab{intro}%
+
+The \emphi{sample property} below is used in \lemref{sample}.
+A related reference is~\cite{sample}.
+
+\begin{lemma}
+    \lemlab{sample}%
+    %
+    The sample property holds for $1+1=2$.
+\end{lemma}
+
+\begin{proof}
+    The statement follows from
+    \[
+        1+1=2.
+    \]
+\end{proof}
+
+\printbibliography
+\end{document}

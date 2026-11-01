@@ -124,12 +124,13 @@ objects.
 
 ## 6. Required LaTeX mechanics
 
-Apply the low-level conventions and workflow of
-`latex-fix` (see [skill locations](README.md#skill-workflows)). These are requirements,
+Apply the low-level conventions and tooling of this standard (see
+[standard tooling and workflows](README.md#standard-tooling-and-workflows)). These are requirements,
 not discretionary exposition advice. Preserve metadata, citation targets, and
 label identities. Follow explicit project build and page-layout instructions.
 
-- Put imports, macros, theorem definitions, and reference helpers in `prefix.tex`.
+- Put imports, macros, theorem definitions, and reference helpers in `prefix.tex`
+  (starter template in [`templates/prefix.tex`](templates/prefix.tex)).
   Keep the main file focused on the class, prefix input, bibliography resources,
   metadata, and body. Split long manuscripts by meaningful sections.
 - Use BibLaTeX with Biber, `\addbibresource`, and `\printbibliography`.
@@ -146,7 +147,7 @@ label identities. Follow explicit project build and page-layout instructions.
   more authors in prose, use `FirstAuthor \etal \cite{key}`.
 - Use `\[ ... \]` for unnumbered displays and an appropriate numbered
   environment for numbered equations. Put math delimiters on separate source
-  lines as specified by the skill. `\begin{math} ... \end{math}` is inline
+  lines (as formatted by `tools/latex_fix_layout`). `\begin{math} ... \end{math}` is inline
   math, even when its source spans lines; never use a formatting pass to change
   an inline formula into a display or vice versa unintentionally. Preserve short
   inline `$...$`; replace `$$...$$` with display delimiters.
@@ -154,18 +155,22 @@ label identities. Follow explicit project build and page-layout instructions.
   PDFs for vector figures. Preserve existing editable TikZ sources. For
   mathematical figure work under `draw-figures`, follow Section 7.
 - **Normalization and `tex-fmt` reindentation are required even for short edits.**
-  Review the source diff and preserve mathematical meaning. Apply the skill's
-  current workflow, configuration, and file exclusions; command sequences belong
-  in the skill, not in a second copy here.
-- Run the convention checks and the project's build. Fix broken citations and
+  Review the source diff and preserve mathematical meaning. Run `tools/latex_fix_layout`
+  to normalize delimiters and labels, then run `tools/latex_indent`. Projects must copy
+  `tools/latex_indent` from this standard into the repository (e.g. at `tools/latex_indent`)
+  and use it directly. Copying `tex-fmt.toml` into project repositories is explicitly
+  forbidden; `tools/latex_indent` encapsulates and resolves the standard configuration
+  directly. Apply the tool's default exclusions (`prefix.tex`, `figs/`, generated files);
+  command sequences belong in the tools, not in a second copy here.
+- Run the convention checks (`tools/latex_check_conventions`) and the project's build. Fix broken citations and
   references, inspect significant layout warnings, and perform the targeted PDF
   checks in Section 8.
   If a tool is unavailable, report the unfinished check; hand formatting does
   not count as running it. Follow the completion checklist below.
 
 Routine formatting does not authorize rewriting mathematical claims or a broad
-grammar pass. Follow the skill's checks, including its test corpus if its scripts
-are changed. Preserve meaning when repairing long displayed equations.
+grammar pass. Follow the convention checks (`tools/latex_check_conventions`).
+Preserve meaning when repairing long displayed equations.
 
 ## 7. Mathematical figure workflow
 

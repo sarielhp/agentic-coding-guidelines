@@ -1,0 +1,210 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+begin
+  require_relative 'tex_source'
+rescue LoadError
+  fallback = '/home/sariel/prog/standards/latex/tools/tex_source.rb'
+  require fallback if File.file?(fallback)
+end
+
+# Normalize math delimiters and specialized labels before running latex_indent.
+module LatexFixLayout
+  VERSION = '0.1.0'
+
+  LABEL_START = /\\[A-Za-z@]+lab\{/
+  BEFORE_LABEL = /(?<=\S)[ \t]*(?=#{LABEL_START})/
+  DOLLAR = /\$\$|\$/
+  MATH_BOUNDARY = /\\\[|\\\]|\\begin\{math\}|\\end\{math\}/
+
+  module_function
+
+  def dollar_pairs(source)
+    pairs = []
+    opening = nil
+    offset = 0
+    protected = TexSource.protected_lines(source)
+    source.each_line.with_index do |line, line_index|
+      if protected[line_index]
+        offset += line.length
+        next
+      end
+
+      code, = TexSource.code_and_comment(line)
+      code.to_enum(:scan, DOLLAR).each do
+        match = Regexp.last_match
+        position = offset + match.begin(0)
+        next if TexSource.escaped?(source, position)
+
+        token = match[0]
+        if opening && opening[0] == token
+          pairs << [opening, [token, position, position + token.length]]
+          opening = nil
+        elsif opening.nil?
+          opening = [token, position, position + token.length]
+        end
+      end
+      offset += line.length
+    end
+    pairs
+  end
+
+  def standalone_or_multiline_math?(source, opening, closing)
+    start = opening[1]
+    finish = closing[2]
+    return true if source[opening[2]...closing[1]].include?("\n")
+
+    line_start = start.zero? ? 0 : (source.rindex("\n", start - 1) || -1) + 1
+    line_end = source.index("\n", finish) || source.length
+    tail_code, = TexSource.code_and_comment(source[finish...line_end])
+    source[line_start...start].strip.empty? && tail_code.strip.empty?
+  end
+
+  def convert_dollars(source)
+    replacements = dollar_pairs(source).flat_map do |opening, closing|
+      token = opening[0]
+      next [] if token == '$' && !standalone_or_multiline_math?(source, opening, closing)
+
+      left, right = token == '$$' ? ['\\[', '\\]'] : ['\\begin{math}', '\\end{math}']
+      [[opening[1], opening[2], left], [closing[1], closing[2], right]]
+    end
+    replacements.sort_by { |start, _finish, _replacement| -start }.each do |start, finish, replacement|
+      source[start...finish] = replacement
+    end
+    source
+  end
+
+  def isolate_math_boundaries(line)
+    code, comment = TexSource.code_and_comment(line)
+    body = code.delete_suffix("\n")
+    indent = body[/\A[ \t]*/]
+    pieces = []
+    cursor = 0
+    body.to_enum(:scan, MATH_BOUNDARY).each do
+      match = Regexp.last_match
+      next if TexSource.escaped?(body, match.begin(0))
+
+      token = match[0]
+      before_raw = body[cursor...match.begin(0)]
+      before = before_raw.strip
+      unless before.empty?
+        piece = "#{indent}#{before}"
+        piece << '%' if token == '\\begin{math}' && !before_raw.match?(/[ \t]\z/)
+        pieces << piece
+      end
+      piece = "#{indent}#{token}"
+      next_character = body[match.end(0)]
+      piece << '%' if token == '\\end{math}' && next_character && !next_character.match?(/\s/)
+      pieces << piece
+      cursor = match.end(0)
+    end
+    return line if pieces.empty?
+
+    tail = body[cursor..].strip
+    pieces << "#{indent}#{tail}" unless tail.empty?
+    pieces[-1] << comment.delete_suffix("\n")
+    pieces.join("\n") + (line.end_with?("\n") ? "\n" : '')
+  end
+
+  def separate_labels(line)
+    code, comment = TexSource.code_and_comment(line)
+    indent = code[/\A[ \t]*/]
+    code.gsub(BEFORE_LABEL, "\n#{indent}") + comment
+  end
+
+  def format_source(source)
+    formatted = convert_dollars(source.dup)
+    protected_lines = TexSource.protected_lines(formatted)
+    formatted = formatted.lines.each_with_index.map do |line, index|
+      protected_lines[index] ? line : isolate_math_boundaries(line)
+    end.join
+    protected_lines = TexSource.protected_lines(formatted)
+    formatted.lines.each_with_index.map do |line, index|
+      protected_lines[index] ? line : separate_labels(line)
+    end.join
+  end
+
+  def format_file(path)
+    source = File.read(path)
+    formatted = format_source(source)
+    File.write(path, formatted) unless formatted == source
+  end
+
+  def excluded_path?(path)
+    base = File.basename(path)
+    return true if base == 'prefix.tex'
+
+    parts = path.split(File::SEPARATOR)
+    parts.include?('figs') || parts.any? { |part| part.start_with?('.') && part != '.' && part != '..' }
+  end
+
+  def default_tex_files
+    Dir.glob('**/*.tex').reject { |path| excluded_path?(path) }.sort
+  end
+
+  def show_help
+    puts <<~HELP
+      latex_fix_layout v#{VERSION} - Normalize LaTeX source math delimiters and typed labels
+
+      PART OF THE LATEX STANDARD:
+        Standards Root: /home/sariel/prog/standards/latex
+        Guidelines:     /home/sariel/prog/standards/latex/GUIDELINES.md
+        Checklist:      /home/sariel/prog/standards/latex/CHECKLIST.md
+
+      DESCRIPTION:
+        Normalizes mathematical displays, delimiters, and specialized typed labels
+        in LaTeX manuscript sources prior to running latex_indent (tex-fmt).
+
+        Transformations performed:
+          1. Converts $$...$$ displays to standard LaTeX \\[...\\] blocks.
+          2. Converts standalone or multiline $...$ displays to \\begin{math}...\\end{math}.
+          3. Isolates delimiters (\\[, \\], \\begin{math}, \\end{math}) on their own lines.
+          4. Isolates typed labels (\\lemlab{...}, \\seclab{...}, \\eqlab{...}, etc.)
+             onto their own source lines ending with %.
+
+        Safety & Protection:
+          Skips comments, escaped delimiters, and literal blocks (verbatim, lstlisting,
+          minted, comment, \\verb, \\url, etc.) via tex_source.rb.
+
+        Always run this script BEFORE running latex_indent so tex-fmt can indent
+        the separated lines properly.
+
+      USAGE:
+        latex_fix_layout [OPTIONS] [FILE.tex ...]
+
+      OPTIONS:
+        -V, --version     Print script version and exit
+        -h, --help        Show this extended help message
+
+      FILE SELECTION & EXCLUSIONS:
+        If no files are specified, all manuscript *.tex files in the current directory
+        tree are normalized, automatically excluding:
+          - prefix.tex (macro definitions and preamble setup)
+          - figs/      (figure sources and generated artifacts)
+          - .*         (hidden files and directories)
+    HELP
+    0
+  end
+
+  def run(argv)
+    return show_help if argv.include?('-h') || argv.include?('--help')
+
+    if argv.include?('-V') || argv.include?('--version')
+      puts "latex_fix_layout #{VERSION}"
+      return 0
+    end
+
+    targets = argv.reject { |arg| arg.start_with?('-') }
+    targets = default_tex_files if targets.empty?
+
+    if targets.empty?
+      warn 'No .tex files found to normalize.'
+      return 0
+    end
+
+    targets.each { |path| format_file(path) }
+    0
+  end
+end
+
+exit LatexFixLayout.run(ARGV) if __FILE__ == $PROGRAM_NAME
