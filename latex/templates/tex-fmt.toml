@@ -4,7 +4,11 @@ tabsize = 4
 tabchar = "space"
 no-indent-envs = ["document"]
 
-# Preserve the paper's hand-chosen paragraph and display line breaks,
-# including separate label and math delimiter lines. Run fix_tex_layout.rb
-# first; tex-fmt indents those lines after they are present in the source.
-wrap = false
+# Wrap long lines at 72 columns. tex-fmt only splits overlong lines; it
+# never joins lines, so the paper's hand-chosen paragraph and display
+# breaks are preserved, including separate label and math delimiter
+# lines. Run latex_fix_layout first; tex-fmt indents those lines after
+# they are present in the source.
+wrap = true
+wraplen = 72
+wrapmin = 72

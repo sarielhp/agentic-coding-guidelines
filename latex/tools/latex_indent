@@ -7,7 +7,7 @@ require 'fileutils'
 
 # Format LaTeX sources with tex-fmt using an embedded standard configuration.
 module LatexIndent
-  VERSION = '0.1.0'
+  VERSION = '0.2.0'
 
   EMBEDDED_CONFIG = <<~TOML
     # Match the paper's four-space environment indentation while leaving
@@ -16,10 +16,14 @@ module LatexIndent
     tabchar = "space"
     no-indent-envs = ["document"]
 
-    # Preserve the paper's hand-chosen paragraph and display line breaks,
-    # including separate label and math delimiter lines. Run fix_tex_layout.rb
-    # first; tex-fmt indents those lines after they are present in the source.
-    wrap = false
+    # Wrap long lines at 72 columns. tex-fmt only splits overlong lines; it
+    # never joins lines, so the paper's hand-chosen paragraph and display
+    # breaks are preserved, including separate label and math delimiter
+    # lines. Run latex_fix_layout first; tex-fmt indents those lines after
+    # they are present in the source.
+    wrap = true
+    wraplen = 72
+    wrapmin = 72
   TOML
 
   module_function
@@ -81,8 +85,8 @@ module LatexIndent
       DESCRIPTION:
         Formats and reindents LaTeX manuscript files using tex-fmt with the
         author-approved standard configuration. Indents environments with 4 spaces,
-        leaves top-level document commands flush left, and preserves manual paragraph
-        and display breaks.
+        leaves top-level document commands flush left, wraps lines longer than
+        72 columns, and preserves manual paragraph and display breaks.
 
         To avoid configuration drift, the tex-fmt configuration is embedded directly
         within this script. Copying tex-fmt.toml into project repositories is explicitly

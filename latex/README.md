@@ -24,7 +24,7 @@ configuration templates, and starter assets are provided locally:
 ### Execution Tools (`tools/`)
 The standard tools are located in [tools/](tools/) and symlinked to `~/bin/`:
 - [tools/latex_fix_layout](tools/latex_fix_layout): Layout normalizer. Isolates math displays (`\[...\]`), multiline math (`\begin{math}...\end{math}`), and typed labels (`\lemlab{...}%`) on their own lines before formatting.
-- [tools/latex_indent](tools/latex_indent): Formatter and indenter using `tex-fmt`. The 4-space environment configuration is embedded directly into the script; copying `tex-fmt.toml` into project repositories is explicitly forbidden to prevent configuration drift.
+- [tools/latex_indent](tools/latex_indent): Formatter and indenter using `tex-fmt`. The 4-space, 72-column configuration is embedded directly into the script; copying `tex-fmt.toml` into project repositories is explicitly forbidden to prevent configuration drift.
 - [tools/latex_check_conventions](tools/latex_check_conventions): Read-only static convention auditor. Verifies typed labels, BibLaTeX/Biber, label line layout, and figure structure.
 - [tools/tex_source.rb](tools/tex_source.rb): Shared LaTeX parser that strips comments and protects verbatim/listing environments.
 
