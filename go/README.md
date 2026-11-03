@@ -26,7 +26,7 @@ This directory defines the authoritative architecture, cognitive complexity boun
     ├── commit.rb           # Gated local commit and structured verification
     ├── bump.rb             # Patch bump, verified push, interrupted-push resume
     ├── install.rb          # Declared targets and installed-content verification
-    └── release.rb          # Commit, full-checked bump, optional installation
+    └── release.rb          # Commit, full-checked bump, installation
 ```
 
 ## Tooling Quick Reference
@@ -100,8 +100,7 @@ rtk proxy tools/snapshot "chore: checkpoint"
 rtk proxy tools/commit 'fix: literal message'  # local commit; no push
 rtk proxy tools/commit --full 'fix: reviewed change'
 rtk proxy tools/bump                   # full verification, bump, commit, verified push
-rtk proxy tools/release 'fix: release'  # fast commit gate, one full bump gate
-rtk proxy tools/release --install 'fix: release'
+rtk proxy tools/release 'fix: release'  # fast commit gate, one full bump gate, install
 rtk proxy tools/install                # separate, explicitly authorized operation
 ```
 

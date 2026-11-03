@@ -101,7 +101,7 @@ The copied [templates](templates/) supply the following common interface:
 | `tools/commit [--full] <message>` | Gate, stage, commit, and record verification; no push |
 | `tools/bump [--resume]` | Validate, bump patch version, commit, explicitly push to the configured upstream, and verify remote SHA; no installation |
 | `tools/install` | Build, install only to declared authorized targets, and compare installed contents with the built artifact |
-| `tools/release [--install] <message>` | Coordinate gated commit, full release checking, bump, verified push, and opt-in installation; stop at the first failure |
+| `tools/release <message>` | Coordinate gated commit, full release checking, bump, verified push, and installation to declared targets; stop at the first failure |
 
 Make targets delegate to these scripts. Keep `tools/gate` and `tools/build`
 compatible with the review-cycle contract; `tools/check` loads the same gate.

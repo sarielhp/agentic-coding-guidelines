@@ -31,7 +31,7 @@ Read and adapt `tools/settings.rb`. Include `templates/Makefile.snippet` in the 
 | `bump [major\|minor\|patch]` | Full-checked version change and verified atomic upstream publication. |
 | `bump --resume` | Resume an inspected failed release without another version change. |
 | `install [names...]` | Build and verify only declared installation targets. |
-| `release [--install] <message>` | Commit and publish a patch release; installation opt-in. |
+| `release <message>` | Commit, publish a patch release, and install to declared targets. |
 
 Use `rtk proxy tools/<command>` for these entry points. Pass the commit message as one literal argument. Use scripts directly for messages containing shell metacharacters; Make interpolation is not an escaping boundary. `tools/check` delegates to `tools/gate`, and `make ci` delegates to the full gate.
 
@@ -47,7 +47,7 @@ Set `TOOLS` overrides when an executable is not on PATH. Additional `FAST_CHECKS
 
 ## Migration from the old templates
 
-Replace the entry points together with their helpers; do not mix old and new script versions. Commits are local, bumps always perform full checks, and install targets must be declared. Bumps no longer install automatically. Use positional `major`/`minor`/`patch` instead of legacy flags, and use `release --install` only for an authorized installation. Release artifacts stay inside the repository until the explicit installer copies them.
+Replace the entry points together with their helpers; do not mix old and new script versions. Commits are local, bumps always perform full checks, and install targets must be declared. Bumps no longer install automatically. Use positional `major`/`minor`/`patch` instead of legacy flags, and note that `release` always runs the installer (skipped when no targets are declared); `--install` is accepted but redundant. Outside a release, artifacts stay inside the repository until the explicit installer copies them.
 
 The `--strict` analyzer option remains accepted, but failures now always exit nonzero. No analyzer is silently skipped or installed by a gate. Reconcile project-specific checks, version generation, and existing installation targets in settings before replacing scripts.
 ## Cargo layouts and milestone suites

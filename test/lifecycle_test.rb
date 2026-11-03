@@ -118,18 +118,22 @@ module LifecycleContract
     assert_match(/installed artifact mismatch/, fails('install'))
   end
 
-  def test_release_stops_after_each_failed_stage_and_install_is_opt_in
+  def test_release_stops_after_each_failed_stage_and_always_installs
     add_remote
     write('change.txt', 'hello')
-    fails('release', '--install', 'fix: failure', env: { 'FAIL' => 'git:commit' })
+    fails('release', 'fix: failure', env: { 'FAIL' => 'git:commit' })
     refute(trace.any? { |row| row[1] == 'push' })
     assert_equal '1.2.3', current_version
     reset_trace
-    succeeds('release', 'fix: release')
+    assert_match(/installation skipped/, succeeds('release', 'fix: release'))
     assert_equal '1.2.4', current_version
-    write('change.txt', 'next')
+    target = File.join(@tmp, 'installed/fixture')
+    setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
+    succeeds('release', 'fix: installed')
+    assert_equal File.binread(File.join(@repo, artifact)), File.binread(target)
+    setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{@tmp.inspect} }.freeze")
     assert_match(/published and verified; installation failed/, fails('release', '--install', 'fix: next'))
-    assert_equal '1.2.5', current_version
+    assert_equal '1.2.6', current_version
   end
 
   def test_snapshot_has_no_gate_or_push

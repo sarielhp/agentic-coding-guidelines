@@ -58,12 +58,12 @@ class RecoveryTest < ToolFixture
     assert_match(/installed artifact mismatch/, fails('install'))
   end
 
-  def test_release_optional_install_runs_after_verified_push
+  def test_release_install_runs_after_verified_push
     target = File.join(@tmp, 'installed/app')
     setting('INSTALL_TARGETS', "{ 'bin/app' => #{target.inspect} }.freeze")
     add_remote
     write('change.txt', 'hello')
-    succeeds('release', '--install', 'fix: installed release')
+    succeeds('release', 'fix: installed release')
     assert_equal 'built 1.2.4', File.read(target)
     assert_equal(1, trace.count { |row| row.include?('-race') })
     pushed = trace.index { |row| row.first == 'git' && row[1] == 'ls-remote' }

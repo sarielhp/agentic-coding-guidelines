@@ -4,16 +4,16 @@
 require_relative 'tooling'
 
 HELP = <<~TEXT
-  Usage: tools/release [--install] <message>
+  Usage: tools/release <message>
 
-  Release: commit, bump the patch version, push, and optionally install.
+  Release: commit, bump the patch version, push, and install.
 
     1. Commit the pending work as <message>, after the fast gate (tools/commit).
     2. Bump the patch version in Project.toml, run the full gate, commit
        "chore: bump version to X.Y.Z" and push the branch, verified
        (tools/bump). The vX.Y.Z tag is pushed too only when RELEASE_TAG is set.
-    3. With --install, install the declared scripts to INSTALL_TARGETS
-       (tools/install).
+    3. Install the declared scripts to INSTALL_TARGETS (tools/install);
+       skipped, with a notice, when no targets are declared.
 
   A release does not register the package; that is tools/publish, run rarely
   and only on request. Steps 1 and 2 change the remote repository and are not
@@ -21,13 +21,12 @@ HELP = <<~TEXT
   an interrupted bump is finished with tools/bump --resume.
 
   Options:
-    --install   Also install to the targets declared in tools/settings.rb.
+    --install   Accepted for compatibility; installation always runs.
     -h, --help  Show this help; nothing is run.
 TEXT
 
 Tooling.entry(HELP) do
-  install_requested = ARGV.first == '--install'
-  ARGV.shift if install_requested
-  abort 'Usage: tools/release [--install] <message>' unless ARGV.length == 1
-  Tooling.release(Tooling.commit_message(ARGV.first), install_requested)
+  ARGV.shift if ARGV.first == '--install'
+  abort 'Usage: tools/release <message>' unless ARGV.length == 1
+  Tooling.release(Tooling.commit_message(ARGV.first))
 end

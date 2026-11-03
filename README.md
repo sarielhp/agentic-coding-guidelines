@@ -75,7 +75,7 @@ agentic-coding-guidelines/
 │       ├── commit.rb        # Gated local commit and structured verification
 │       ├── bump.rb          # Full-checked patch bump and verified upstream push
 │       ├── install.rb       # Declared installation and content verification
-│       └── release.rb       # Commit, bump, push; installation opt-in
+│       └── release.rb       # Commit, bump, push, install
 ├── julia/
 │   ├── README.md             # Julia quick reference & CLI usage
 │   ├── GUIDELINES.md         # Canonical Operational Guide (agent & human ready)
@@ -167,7 +167,7 @@ All three languages use the same separation of build, checking, local commits, p
 | `tools/bump` | Version change, full gate, commit, and verified push to the configured upstream; no installation. |
 | `tools/bump --resume` | Resume an inspected interrupted release without another bump. |
 | `tools/install` | Build and verify declared installation targets when installation is authorized. |
-| `tools/release [--install] <message>` | Commit and publish; installation only with `--install`. |
+| `tools/release <message>` | Commit, publish, and install to declared targets. |
 | `review-cycle` | Separate remediation engine; uses the project's build/gate contract. |
 
 The language lifecycle scripts stop on missing required tools and failed commands. The separate review engine checks verification and Git failures, defaults to local commits, and documents its remaining boundaries in [workflow/README.md](workflow/README.md). Bootstrap remains separate. Bumps check changed versions fully and verify remote refs. Compiler/dependency caches may be external; repository artifacts stay inside the repository. Reuse session authorization while keeping sandboxing and manual approval review enabled.

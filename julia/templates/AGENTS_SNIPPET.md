@@ -26,7 +26,7 @@ says what each one does and runs nothing):
 | `rtk proxy tools/commit [--full] <message>` | Requested gated local commit |
 | `rtk proxy tools/bump [major\|minor\|patch]` | Requested version bump and verified push |
 | `rtk proxy tools/bump --resume` | Resume an inspected failed push without bumping again |
-| `rtk proxy tools/release [--install] <message>` | Requested release: commit, bump, push; never registers |
+| `rtk proxy tools/release <message>` | Requested release: commit, bump, push, install to declared targets; never registers |
 | `rtk proxy tools/publish [release notes]` | Registration in General; see below |
 
 **Publishing is rare and needs an explicit request.** A release pushes a new version

@@ -342,14 +342,16 @@ module Tooling
     raise "installed permissions mismatch: #{destination}" unless File.stat(built).mode == File.stat(destination).mode
   end
 
-  def release(message, install_requested)
+  def release(message)
     published = false
     upstream
     version
     script('commit', message)
     script('bump')
     published = true
-    script('install') if install_requested
+    return puts('No INSTALL_TARGETS declared; installation skipped.') if ToolSettings::INSTALL_TARGETS.empty?
+
+    script('install')
   rescue StandardError => e
     state = if published
               'Release published and verified; installation failed. Retry tools/install separately.'

@@ -135,7 +135,7 @@ class LifecycleTest < ToolFixture
     assert_match(/mismatch|directory/, fails('install'))
   end
 
-  def test_release_orders_full_gate_push_and_optional_install
+  def test_release_orders_full_gate_push_and_install
     add_remote
     write('change.txt', 'hello')
     succeeds('release', 'fix: release')
@@ -143,8 +143,9 @@ class LifecycleTest < ToolFixture
     refute(trace.any? { |row| row[1] == 'install' })
     reset_trace
     write('change.txt', 'next')
-    err = fails('release', '--install', 'fix: next')
-    assert_match(/installation unsupported/, err)
+    setting('INSTALL_TARGETS', "{ 'bin/app' => #{@tmp.inspect} }.freeze")
+    err = fails('release', 'fix: next')
+    assert_match(/mismatch|directory/, err)
     assert_match(/Release published and verified; installation failed/, err)
     assert_equal command('rev-parse', 'HEAD').strip, command('ls-remote', 'origin', 'refs/heads/main').split.first
   end
@@ -152,11 +153,11 @@ class LifecycleTest < ToolFixture
   def test_release_stops_on_commit_and_bump_failure
     add_remote
     write('change.txt', 'hello')
-    fails('release', '--install', 'fix: failure', env: { 'FAIL_GIT' => 'commit' })
+    fails('release', 'fix: failure', env: { 'FAIL_GIT' => 'commit' })
     refute(trace.any? { |row| row[1] == 'push' })
     assert_equal "1.2.3\n", File.read(File.join(@repo, 'VERSION'))
     reset_trace
-    fails('release', '--install', 'fix: failure', env: { 'FAIL_TOOL' => 'govulncheck' })
+    fails('release', 'fix: failure', env: { 'FAIL_TOOL' => 'govulncheck' })
     refute(trace.any? { |row| row[1] == 'push' })
   end
 
