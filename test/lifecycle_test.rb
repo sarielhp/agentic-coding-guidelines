@@ -136,6 +136,21 @@ module LifecycleContract
     assert_equal '1.2.6', current_version
   end
 
+  # A release with nothing pending skips tools/commit, whose `git commit`
+  # would fail on a clean tree, and still bumps, publishes and installs.
+  def test_release_from_clean_tree_skips_commit
+    target = File.join(@tmp, 'installed/fixture')
+    setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
+    add_remote
+    write('change.txt', 'hello')
+    checkpoint
+    assert_match(/Nothing to commit/, succeeds('release', 'fix: nothing pending'))
+    refute_includes git('log', '--format=%s'), 'fix: nothing pending'
+    assert_equal '1.2.4', current_version
+    assert_equal File.binread(File.join(@repo, artifact)), File.binread(target)
+    assert_equal git('rev-parse', 'HEAD').strip, git('ls-remote', 'origin', 'refs/heads/main').split.first
+  end
+
   def test_snapshot_has_no_gate_or_push
     write('change.txt', 'checkpoint')
     succeeds('snapshot', 'chore: checkpoint')

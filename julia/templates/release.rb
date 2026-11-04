@@ -8,7 +8,8 @@ HELP = <<~TEXT
 
   Release: commit, bump the patch version, push, and install.
 
-    1. Commit the pending work as <message>, after the fast gate (tools/commit).
+    1. Commit the pending work as <message>, after the fast gate (tools/commit);
+       skipped when there is nothing to commit.
     2. Bump the patch version in Project.toml, run the full gate, commit
        "chore: bump version to X.Y.Z" and push the branch, verified
        (tools/bump). The vX.Y.Z tag is pushed too only when RELEASE_TAG is set.

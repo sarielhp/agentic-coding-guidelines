@@ -150,6 +150,21 @@ class LifecycleTest < ToolFixture
     assert_equal command('rev-parse', 'HEAD').strip, command('ls-remote', 'origin', 'refs/heads/main').split.first
   end
 
+  # A release with nothing pending skips tools/commit, whose `git commit`
+  # would fail on a clean tree, and still bumps, publishes and installs.
+  def test_release_from_clean_tree_skips_commit
+    target = File.join(@tmp, 'installed/app')
+    setting('INSTALL_TARGETS', "{ 'bin/app' => #{target.inspect} }.freeze")
+    add_remote
+    write('change.txt', 'hello')
+    checkpoint
+    assert_match(/Nothing to commit/, succeeds('release', 'fix: nothing pending'))
+    refute_includes command('log', '--format=%s'), 'fix: nothing pending'
+    assert_equal "1.2.4\n", File.read(File.join(@repo, 'VERSION'))
+    assert_equal 'built 1.2.4', File.read(target)
+    assert_equal command('rev-parse', 'HEAD').strip, command('ls-remote', 'origin', 'refs/heads/main').split.first
+  end
+
   def test_release_stops_on_commit_and_bump_failure
     add_remote
     write('change.txt', 'hello')
