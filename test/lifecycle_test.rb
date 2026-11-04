@@ -112,8 +112,8 @@ module LifecycleContract
     setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
     path = File.join(@repo, 'tools/tooling.rb')
     content = File.read(path)
-    content.sub!('FileUtils.cp(built, destination, preserve: true) unless link',
-                 "FileUtils.cp(built, destination, preserve: true) unless link\n    File.binwrite(destination, 'corrupt')")
+    assert content.sub!('File.rename(temporary, destination)',
+                        "File.rename(temporary, destination)\n    File.binwrite(destination, 'corrupt')")
     File.write(path, content)
     assert_match(/installed artifact mismatch/, fails('install'))
   end
@@ -149,6 +149,51 @@ module LifecycleContract
     assert_equal '1.2.4', current_version
     assert_equal File.binread(File.join(@repo, artifact)), File.binread(target)
     assert_equal git('rev-parse', 'HEAD').strip, git('ls-remote', 'origin', 'refs/heads/main').split.first
+  end
+
+  # Rerunning a successful release confirms it: no bump or push, and an
+  # installation that already matches the build is left untouched.
+  def test_release_twice_confirms_without_bumping_or_reinstalling
+    target = File.join(@tmp, 'installed/fixture')
+    setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
+    add_remote
+    write('change.txt', 'hello')
+    succeeds('release', 'fix: first')
+    released = git('rev-parse', 'HEAD').strip
+    inode = File.stat(target).ino
+    reset_trace
+    out = succeeds('release', 'fix: again')
+    assert_match(/Nothing new since release 1\.2\.4/, out)
+    assert_match(/already up to date/, out)
+    assert_equal released, git('rev-parse', 'HEAD').strip
+    assert_equal '1.2.4', current_version
+    refute(trace.any? { |row| row[1] == 'push' })
+    assert_equal inode, File.stat(target).ino
+  end
+
+  # A release commit the upstream branch lacks is an interrupted or diverged
+  # release; release must not bump on top of it.
+  def test_release_refuses_a_release_commit_the_upstream_lacks
+    add_remote
+    write('change.txt', 'hello')
+    succeeds('release', 'fix: first')
+    git('push', '-f', 'origin', 'HEAD~1:refs/heads/main')
+    assert_match(%r{1\.2\.4 release commit, but refs/heads/main}, fails('release', 'fix: again'))
+    assert_equal '1.2.4', current_version
+  end
+
+  # A changed target is replaced by rename (a running program cannot be
+  # overwritten in place), leaving no temporary file behind.
+  def test_install_replaces_a_changed_target_by_rename
+    target = File.join(@tmp, 'installed/fixture')
+    setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
+    succeeds('install')
+    inode = File.stat(target).ino
+    File.write(target, 'stale')
+    succeeds('install')
+    refute_equal inode, File.stat(target).ino
+    assert_equal File.binread(File.join(@repo, artifact)), File.binread(target)
+    assert_empty Dir.glob(File.join(File.dirname(target), '.*.tmp'))
   end
 
   def test_snapshot_has_no_gate_or_push

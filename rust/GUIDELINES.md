@@ -141,7 +141,7 @@ Copy the templates into the project; the helpers load project-local settings and
 | `tools/bump [major\|minor\|patch]` | Require a clean tree and configured branch upstream; update version, run the full gate, commit, tag, and push. Default is patch. |
 | `tools/bump --resume` | Resume an inspected interrupted release at its pending version, never bumping again. |
 | `tools/install [names...]` | Build, then install only selected declared artifacts to declared absolute destinations; verify bytes and executable permissions. |
-| `tools/release <message>` | Local gated commit followed by full-checked bump, verified publication, and installation to declared targets (skipped when none are declared). |
+| `tools/release <message>` | Local gated commit followed by full-checked bump, verified publication, and installation to declared targets (skipped when none are declared). Each step is skipped when its work is already done, so a rerun only confirms. |
 
 Bumps never trust the old `.verified_head` marker or assume a version-only edit is safe. Version changes, lock synchronization, and version-generation commands happen before checks. Publication pushes only the release commit to its configured upstream branch and the requested annotated tag; it verifies the exact remote branch and peeled tag commit. No unrelated tags are pushed. The remote must support atomic pushes. `RELEASE_TAG = false` explicitly disables tagging.
 

@@ -167,7 +167,7 @@ All three languages use the same separation of build, checking, local commits, p
 | `tools/bump` | Version change, full gate, commit, and verified push to the configured upstream; no installation. |
 | `tools/bump --resume` | Resume an inspected interrupted release without another bump. |
 | `tools/install` | Build and verify declared installation targets when installation is authorized. |
-| `tools/release <message>` | Commit, publish, and install to declared targets. |
+| `tools/release <message>` | Commit, publish, and install to declared targets; steps already done are skipped. |
 | `review-cycle` | Separate remediation engine; uses the project's build/gate contract. |
 
 The language lifecycle scripts stop on missing required tools and failed commands. The separate review engine checks verification and Git failures, defaults to local commits, and documents its remaining boundaries in [workflow/README.md](workflow/README.md). Bootstrap remains separate. Bumps check changed versions fully and verify remote refs. Compiler/dependency caches may be external; repository artifacts stay inside the repository. Reuse session authorization while keeping sandboxing and manual approval review enabled.

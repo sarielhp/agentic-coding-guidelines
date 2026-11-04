@@ -54,7 +54,7 @@ project's `tools/`, dropping the `.rb` suffix except on `tooling.rb`, `language.
 | Step | What it does |
 |---|---|
 | `tools/gate` | `julia-audit --strict`, `julia-static-analysis --syntax --format`, `Pkg.test()`, precompile; `--full` adds JET and ExplicitImports |
-| `tools/release <message>` | Commit, bump the version in `Project.toml`, run the full gate, push. Frequent; never registers |
+| `tools/release <message>` | Commit, bump the version in `Project.toml`, run the full gate, push, install; steps already done are skipped. Frequent; never registers |
 | `tools/publish [notes]` | Register the pushed release in General: wait for `PUBLISH_WORKFLOW` on the commit, then comment `@JuliaRegistrator register`. Rare, and only on explicit request |
 
 Releasing and registering are separate on purpose. A release only pushes a version; a

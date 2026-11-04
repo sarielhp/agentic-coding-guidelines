@@ -165,6 +165,52 @@ class LifecycleTest < ToolFixture
     assert_equal command('rev-parse', 'HEAD').strip, command('ls-remote', 'origin', 'refs/heads/main').split.first
   end
 
+  # Rerunning a successful release confirms it: no bump, gate, or push, and
+  # an installation that already matches the build is left untouched.
+  def test_release_twice_confirms_without_bumping_or_reinstalling
+    target = File.join(@tmp, 'installed/app')
+    setting('INSTALL_TARGETS', "{ 'bin/app' => #{target.inspect} }.freeze")
+    add_remote
+    write('change.txt', 'hello')
+    succeeds('release', 'fix: first')
+    released = command('rev-parse', 'HEAD').strip
+    inode = File.stat(target).ino
+    reset_trace
+    out = succeeds('release', 'fix: again')
+    assert_match(/Nothing new since release 1\.2\.4/, out)
+    assert_match(/already up to date/, out)
+    assert_equal released, command('rev-parse', 'HEAD').strip
+    assert_equal "1.2.4\n", File.read(File.join(@repo, 'VERSION'))
+    refute(trace.any? { |row| row.first == 'git' && row[1] == 'push' })
+    refute(trace.any? { |row| row.include?('-race') })
+    assert_equal inode, File.stat(target).ino
+  end
+
+  # A release commit the upstream branch lacks is an interrupted or diverged
+  # release; release must not bump on top of it.
+  def test_release_refuses_a_release_commit_the_upstream_lacks
+    add_remote
+    write('change.txt', 'hello')
+    succeeds('release', 'fix: first')
+    command('push', '-f', 'origin', 'HEAD~1:refs/heads/main')
+    assert_match(%r{1\.2\.4 release commit, but refs/heads/main}, fails('release', 'fix: again'))
+    assert_equal "1.2.4\n", File.read(File.join(@repo, 'VERSION'))
+  end
+
+  # A changed target is replaced by rename (a running program cannot be
+  # overwritten in place), leaving no temporary file behind.
+  def test_install_replaces_a_changed_target_by_rename
+    target = File.join(@tmp, 'installed/app')
+    setting('INSTALL_TARGETS', "{ 'bin/app' => #{target.inspect} }.freeze")
+    succeeds('install')
+    inode = File.stat(target).ino
+    File.write(target, 'stale')
+    succeeds('install')
+    refute_equal inode, File.stat(target).ino
+    assert_equal File.binread(File.join(@repo, 'bin/app')), File.binread(target)
+    assert_empty Dir.glob(File.join(File.dirname(target), '.*.tmp'))
+  end
+
   def test_release_stops_on_commit_and_bump_failure
     add_remote
     write('change.txt', 'hello')

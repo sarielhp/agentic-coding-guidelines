@@ -326,6 +326,24 @@ module Tooling
     puts 'Installation verified'
   end
 
+  # True when destination already holds built's bytes and permissions.
+  def installed?(built, destination)
+    File.file?(destination) && !File.symlink?(destination) &&
+      Digest::SHA256.file(built) == Digest::SHA256.file(destination) &&
+      File.stat(built).mode == File.stat(destination).mode
+  end
+
+  # Copies built beside destination and renames it into place, so a running
+  # program is replaced rather than overwritten ("Text file busy") and no
+  # reader ever sees a partial file.
+  def replace_file(built, destination)
+    temporary = File.join(File.dirname(destination), ".#{File.basename(destination)}.#{Process.pid}.tmp")
+    FileUtils.cp(built, temporary, preserve: true)
+    File.rename(temporary, destination)
+  ensure
+    FileUtils.rm_f(temporary) if temporary
+  end
+
   def install_artifact(source, destination, link)
     built = contained_path(source)
     raise "installation source is not executable: #{source}" unless File.file?(built) && File.executable?(built)
@@ -337,9 +355,29 @@ module Tooling
       FileUtils.ln_s(built, destination)
       raise "installed link mismatch: #{destination}" unless File.realpath(destination) == built
     end
-    FileUtils.cp(built, destination, preserve: true) unless link
+    unless link
+      return puts("#{destination} is already up to date") if installed?(built, destination)
+
+      replace_file(built, destination)
+    end
     raise "installed artifact mismatch: #{destination}" unless expected == Digest::SHA256.file(destination).hexdigest
     raise "installed permissions mismatch: #{destination}" unless File.stat(built).mode == File.stat(destination).mode
+  end
+
+  # True when HEAD is the bump commit of the current version and the upstream
+  # branch already points at it: there is nothing new to bump or push. A bump
+  # commit the upstream lacks is an interrupted or diverged release, which
+  # needs inspection rather than a second bump.
+  def released?
+    current = version.last
+    return false unless git('log', '-1', '--format=%s').strip == "chore: bump version to #{current}"
+
+    destination, ref = upstream
+    actual = git('ls-remote', destination, ref).split.first
+    return true if actual == head
+
+    raise "HEAD is the #{current} release commit, but #{ref} at #{destination} is #{actual.inspect}; " \
+          'inspect, then use tools/bump --resume or push it'
   end
 
   def release(message)
@@ -351,7 +389,11 @@ module Tooling
     else
       script('commit', message)
     end
-    script('bump')
+    if released?
+      puts "Nothing new since release #{version.last}; skipping the bump."
+    else
+      script('bump')
+    end
     published = true
     return puts('No INSTALL_TARGETS declared; installation skipped.') if ToolSettings::INSTALL_TARGETS.empty?
 

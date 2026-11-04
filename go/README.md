@@ -67,8 +67,10 @@ Edit `tools/settings.rb` before use:
 - `TOOLS` overrides individual executable paths. Otherwise GOBIN, GOPATH/bin,
   normal PATH, `~/.go/bin`, and `~/go/bin` resolve tools without shell wrappers.
 - `INSTALL_TARGETS` maps declared artifacts to absolute authorized destinations.
-  The empty default clearly rejects installation. It copies and compares bytes
-  and permissions, rejecting destination symlinks; it does no unrelated cleanup.
+  The empty default clearly rejects installation. It leaves a target that
+  already matches alone, otherwise copies beside it and renames into place (so a
+  running program is replaced, not overwritten), then compares bytes and
+  permissions, rejecting destination symlinks; it does no unrelated cleanup.
 - `VERSION_FILE` defaults to `VERSION` and requires strict `major.minor.patch`.
   `VERSION_KIND = :embedded` conservatively runs full checking after the bump.
   `VERSION_UPDATE` contains explicit command arrays for source version updates,
@@ -149,7 +151,10 @@ repair the issue and inspect pending state, then resume runs a full gate and
 completes that version's commit. It requires the original HEAD and pending version
 to match; unexpected history changes require manual inspection. Do not rerun an
 ordinary bump. Release requires a
-message and stops at each failed stage. A verified push followed by install
+message and stops at each failed stage. Each stage is skipped when its work is
+already done: no commit without pending changes, no bump when HEAD is the
+release commit the upstream already has, and no copy onto an identical target,
+so rerunning a successful release only confirms it. A verified push followed by install
 failure is reported as installation failure after publication; retry install
 separately. Make delegates accept ordinary shell arguments; use the direct Ruby
 entry point for commit messages containing shell metacharacters.

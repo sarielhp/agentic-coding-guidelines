@@ -49,11 +49,11 @@ class RecoveryTest < ToolFixture
   def test_corrupted_installation_is_detected
     target = File.join(@tmp, 'installed/app')
     setting('INSTALL_TARGETS', "{ 'bin/app' => #{target.inspect} }.freeze")
-    # Inject corruption immediately after the copy in this disposable tool copy.
+    # Inject corruption right after the rename into place in this disposable tool copy.
     path = File.join(@repo, 'tools/tooling.rb')
     contents = File.read(path)
-    contents.sub!('FileUtils.cp(built, destination, preserve: true)',
-                  "FileUtils.cp(built, destination, preserve: true)\n      File.binwrite(destination, 'corrupt')")
+    assert contents.sub!('File.rename(temporary, destination)',
+                         "File.rename(temporary, destination)\n    File.binwrite(destination, 'corrupt')")
     File.write(path, contents)
     assert_match(/installed artifact mismatch/, fails('install'))
   end
