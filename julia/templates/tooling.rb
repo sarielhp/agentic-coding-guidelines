@@ -208,7 +208,9 @@ module Tooling
   end
 
   def bump(level = 'patch')
-    raise 'unfinished release; inspect local state and use tools/bump --resume' if File.exist?(state_path('release'))
+    if File.exist?(state_path('release'))
+      raise 'unfinished release; inspect local state and use tools/bump --resume, or --abandon if nothing was published'
+    end
 
     destination, ref = upstream
     _, current = version
@@ -227,7 +229,8 @@ module Tooling
     finish_pending_commit(data)
     publish(data)
   rescue StandardError => e
-    raise "#{e.message}\nLocal state retained. Inspect and use tools/bump --resume; it never bumps again."
+    raise "#{e.message}\nLocal state retained. Inspect and use tools/bump --resume; it never bumps again. " \
+          'If nothing was published, tools/bump --abandon drops it.'
   end
 
   def finish_pending_commit(data)
@@ -256,7 +259,9 @@ module Tooling
 
     data = JSON.parse(File.read(path), symbolize_names: true)
     unless data[:commit]
-      raise 'HEAD or version changed; inspect pending release' unless head == data.fetch(:base) && version.last == data.fetch(:version)
+      unless head == data.fetch(:base) && version.last == data.fetch(:version)
+        raise 'HEAD or version changed; inspect, then drop the pending release with tools/bump --abandon'
+      end
 
       ToolSettings::VERSION_UPDATE.each { |args| run(*args) }
       Language.synchronize_version
@@ -267,6 +272,51 @@ module Tooling
     raise 'HEAD, working tree, or checked inputs changed since release commit' unless unchanged
 
     publish(data)
+  end
+
+  # Drops a pending release that never reached the remote, so a bump that can
+  # no longer resume (HEAD moved, the fix needed a commit) does not need its
+  # state file deleted by hand. The bump commit and its local tag go only while
+  # HEAD is still that commit; an uncommitted pending version is restored.
+  # Other files the bump touched are listed, not reverted.
+  def abandon
+    path = state_path('release')
+    raise 'no interrupted release to abandon' unless File.file?(path)
+
+    data = JSON.parse(File.read(path), symbolize_names: true)
+    refuse_published_release(data)
+    data[:commit] ? drop_release_commit(data) : restore_pending_version(data)
+    FileUtils.rm_f(path)
+    puts "Abandoned release #{data.fetch(:version)}; nothing was published"
+    left = git('status', '--porcelain')
+    puts "Left for inspection:\n#{left}" unless left.empty?
+  end
+
+  def refuse_published_release(data)
+    destination = data.fetch(:destination)
+    published = data[:commit] && git('ls-remote', destination, data.fetch(:ref)).split.first == data[:commit]
+    published ||= data[:tag] && !git('ls-remote', destination, "refs/tags/#{data[:tag]}").empty?
+    raise 'the release already reached the remote; finish it with tools/bump --resume' if published
+  end
+
+  def drop_release_commit(data)
+    commit = data.fetch(:commit)
+    raise 'HEAD is no longer the release commit; inspect and remove it by hand' unless head == commit
+    raise 'abandon requires a clean working tree' unless git('status', '--porcelain').empty?
+
+    delete_release_tag(data[:tag], commit) if data[:tag]
+    git('reset', '--keep', "#{commit}^")
+  end
+
+  def delete_release_tag(tag, commit)
+    ref = "refs/tags/#{tag}"
+    _, _, status = capture(executable('git'), 'show-ref', '--verify', '--quiet', ref)
+    git('tag', '-d', tag) if status.success? && git('rev-parse', "#{ref}^{}").strip == commit
+  end
+
+  def restore_pending_version(data)
+    file, value = version
+    git('checkout', 'HEAD', '--', file) if value == data.fetch(:version)
   end
 
   def ensure_release_tag(data)

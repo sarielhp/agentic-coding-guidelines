@@ -30,6 +30,7 @@ Read and adapt `tools/settings.rb`. Include `templates/Makefile.snippet` in the 
 | `commit [--full] <message>` | Verified local commit; no push. |
 | `bump [major\|minor\|patch]` | Full-checked version change and verified atomic upstream publication. |
 | `bump --resume` | Resume an inspected failed release without another version change. |
+| `bump --abandon` | Drop a failed release that published nothing: remove its unpushed commit and tag, or restore the version file. |
 | `install [names...]` | Build and verify only declared installation targets. |
 | `release <message>` | Commit, publish a patch release, and install to declared targets. |
 
@@ -39,7 +40,7 @@ Use `rtk proxy tools/<command>` for these entry points. Pass the commit message 
 
 Releases require an attached branch, its configured remote branch upstream, and exactly one push URL. Bumps require a clean tree and strict `major.minor.patch` version. Full checks run after all version-dependent files are updated. The requested annotated tag and exact commit go to the configured upstream branch; remote SHA verification includes the peeled tag. Unrelated tags remain local. Missing analyzers, failed stages, unsupported atomic push, or remote mismatch fail the command.
 
-Interrupted releases retain `.git/tooling-release.json`. Inspect the failure and local state, repair the cause, then run `tools/bump --resume`. It never increments the pending version. It rejects changed committed inputs; do not bypass this by editing the verification record. Legacy `.verified_head` markers are ignored.
+Interrupted releases retain `.git/tooling-release.json`. Inspect the failure and local state, repair the cause, then run `tools/bump --resume`. It never increments the pending version. It rejects changed committed inputs; do not bypass this by editing the verification record. When resume cannot apply (for example HEAD moved because the fix needed its own commit) and nothing reached the remote, `tools/bump --abandon` drops the pending release: it removes the unpushed bump commit and its local tag while HEAD is still that commit, or restores an uncommitted version file, deletes the record, and lists any other changed files for inspection. It refuses a release whose commit or tag is already on the remote. Legacy `.verified_head` markers are ignored.
 
 `INSTALL_TARGETS = { 'artifact/path' => '/absolute/authorized/destination' }.freeze` declares installation scope. The default empty mapping disables installation. Targets must refer to declared `ARTIFACTS`, or language-discovered artifacts. Installation runs `tools/build` and verifies installed content and permissions. A declaration describes scope; user authorization and sandbox permissions still govern external writes.
 

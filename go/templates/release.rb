@@ -21,7 +21,8 @@ HELP = <<~TEXT
   Rerunning after a success does nothing but confirm it. Steps 1 and 2 change
   the remote repository and are not undone by rerunning. If a step fails, the
   message says what was published; an interrupted bump is finished with
-  tools/bump --resume.
+  tools/bump --resume, or dropped with tools/bump --abandon when
+  nothing was published.
 
   Options:
     --install   Accepted for compatibility; installation always runs.

@@ -99,7 +99,7 @@ The copied [templates](templates/) supply the following common interface:
 | `tools/lint` | Fast static checks, without tests, artifact builds, or Git mutations |
 | `tools/snapshot [message]` | Local checkpoint commit without a gate or push |
 | `tools/commit [--full] <message>` | Gate, stage, commit, and record verification; no push |
-| `tools/bump [--resume]` | Validate, bump patch version, commit, explicitly push to the configured upstream, and verify remote SHA; no installation |
+| `tools/bump [--resume\|--abandon]` | Validate, bump patch version, commit, explicitly push to the configured upstream, and verify remote SHA; no installation |
 | `tools/install` | Build, install only to declared authorized targets, and compare installed contents with the built artifact |
 | `tools/release <message>` | Coordinate gated commit, full release checking, bump, verified push, and installation to declared targets; skip each step whose work is already done, so a rerun only confirms; stop at the first failure |
 
@@ -173,6 +173,7 @@ that URL for both push and verification. After a failed push or remote query, in
 local state and use `tools/bump --resume` to retry the same commit. Earlier
 check/commit failures require inspection and repair; resume can full-check and
 commit the pending version when the original HEAD and pending version still match.
+Otherwise, if nothing was published, `tools/bump --abandon` drops the pending release.
 Never blindly repeat bump.
 Do not pull, merge, rebase, or synchronize unrelated refs automatically.
 

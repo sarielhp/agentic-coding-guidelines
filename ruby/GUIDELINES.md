@@ -153,12 +153,13 @@ Copy the templates into the project; the helpers load project-local settings and
 | `tools/commit [--full] <message>` | Gate, stage, and commit locally. A structured verification record can reuse checks only for matching HEAD, inputs, tools, environment, and check level. |
 | `tools/bump [major\|minor\|patch]` | Require a clean tree and configured branch upstream; update version, run the full gate, commit, tag, and push. Default is patch. |
 | `tools/bump --resume` | Resume an inspected interrupted release at its pending version, never bumping again. |
+| `tools/bump --abandon` | Drop an interrupted release that published nothing, so the next bump starts fresh. |
 | `tools/install [names...]` | Build, then install only selected declared artifacts to declared absolute destinations; verify bytes and executable permissions. |
 | `tools/release <message>` | Local gated commit followed by full-checked bump, verified publication, and installation to declared targets (skipped when none are declared). Each step is skipped when its work is already done, so a rerun only confirms. |
 
 Bumps never trust the old `.verified_head` marker or assume a version-only edit is safe. Version changes, lock synchronization, and version-generation commands happen before checks. Publication pushes only the release commit to its configured upstream branch and the requested annotated tag; it verifies the exact remote branch and peeled tag commit. No unrelated tags are pushed. The remote must support atomic pushes. `RELEASE_TAG = false` explicitly disables tagging.
 
-An interrupted bump leaves files, commits, tags, and `.git/tooling-release.json` available for inspection. Repair the cause and use `--resume`; a committed release rejects changed HEAD, worktree, or checked inputs. If installation fails after publication, the command reports that publication succeeded and installation failed. It does not claim the release was rolled back.
+An interrupted bump leaves files, commits, tags, and `.git/tooling-release.json` available for inspection. Repair the cause and use `--resume`; a committed release rejects changed HEAD, worktree, or checked inputs. If resume no longer applies and nothing was published, use `--abandon` rather than deleting the record by hand. If installation fails after publication, the command reports that publication succeeded and installation failed. It does not claim the release was rolled back.
 
 Installation is disabled until `INSTALL_TARGETS` declares artifact-to-destination mappings. Libraries can use `ARTIFACTS = []`. Undeclared names, escaping artifact paths, and unrelated destination symlinks fail. Checking or committing never installs. Tool bootstrap is a separate authorized action; missing analyzers never trigger installation.
 

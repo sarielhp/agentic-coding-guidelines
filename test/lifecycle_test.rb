@@ -226,6 +226,51 @@ module LifecycleContract
     assert_match(/checked inputs changed/, fails('bump', '--resume'))
   end
 
+  def reject_pushes(bare)
+    hook = File.join(bare, 'hooks/pre-receive')
+    File.write(hook, "#!#{RbConfig.ruby}\nexit 1\n")
+    File.chmod(0o755, hook)
+    hook
+  end
+
+  def test_abandon_drops_unpublished_release_commit_and_tag
+    hook = reject_pushes(add_remote)
+    start = git('rev-parse', 'HEAD')
+    assert_match(/--abandon drops it/, fails('bump'))
+    assert_match(/Abandoned release 1\.2\.4/, succeeds('bump', '--abandon'))
+    assert_equal [start, '1.2.3', ''], [git('rev-parse', 'HEAD'), current_version, git('status', '--porcelain')]
+    assert_empty git('tag', '--list', 'v1.2.4')
+    refute File.exist?(marker('release'))
+    FileUtils.rm(hook)
+    succeeds('bump')
+    assert_equal '1.2.4', current_version
+  end
+
+  # The case that motivated --abandon: a fix committed while the bump was
+  # pending leaves --resume nothing it may do.
+  def test_abandon_restores_uncommitted_version_after_head_moved
+    add_remote
+    fails('bump', env: { 'FAIL' => 'git:add' })
+    write('fix.txt', 'fix')
+    git('add', 'fix.txt')
+    git('commit', '-m', 'fix')
+    assert_match(/--abandon/, fails('bump', '--resume'))
+    succeeds('bump', '--abandon')
+    assert_equal '1.2.3', current_version
+    refute File.exist?(marker('release'))
+    assert_match(/no interrupted release to abandon/, fails('bump', '--abandon'))
+  end
+
+  def test_abandon_refuses_a_release_that_reached_the_remote
+    hook = reject_pushes(add_remote)
+    fails('bump')
+    FileUtils.rm(hook)
+    git('push', 'origin', 'HEAD:refs/heads/main')
+    assert_match(/already reached the remote/, fails('bump', '--abandon'))
+    assert File.file?(marker('release'))
+    succeeds('bump', '--resume')
+  end
+
   # `tools/release --help` once committed pending work as "--help", bumped the
   # version and pushed. Help must print and run nothing, wherever the flag sits;
   # a message that looks like an option must be refused before anything runs.

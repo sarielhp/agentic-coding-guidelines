@@ -4,7 +4,7 @@
 require_relative 'tooling'
 
 HELP = <<~TEXT
-  Usage: tools/bump [major|minor|patch|--resume]
+  Usage: tools/bump [major|minor|patch|--resume|--abandon]
 
   Release the committed tree. The working tree must be clean.
 
@@ -20,11 +20,17 @@ HELP = <<~TEXT
     major, minor, patch  Which part of the version to raise.
     --resume    Finish a bump that stopped partway, without bumping the
                 version again.
+    --abandon   Drop a stopped bump that published nothing: remove its
+                unpushed commit and tag, or restore the version file.
     -h, --help  Show this help; nothing is run.
 TEXT
 
 Tooling.entry(HELP) do
-  abort 'Usage: tools/bump [major|minor|patch|--resume]' unless ARGV.length <= 1 && (ARGV.empty? || %w[major minor patch
-                                                                                                       --resume].include?(ARGV.first))
-  ARGV.first == '--resume' ? Tooling.resume : Tooling.bump(ARGV.first || 'patch')
+  usage = 'Usage: tools/bump [major|minor|patch|--resume|--abandon]'
+  abort usage unless ARGV.length <= 1 && (ARGV.empty? || %w[major minor patch --resume --abandon].include?(ARGV.first))
+  case ARGV.first
+  when '--resume' then Tooling.resume
+  when '--abandon' then Tooling.abandon
+  else Tooling.bump(ARGV.first || 'patch')
+  end
 end

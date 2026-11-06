@@ -149,7 +149,10 @@ rtk proxy tools/bump --resume
 Resume never increments the version. If failure occurred before a release commit,
 repair the issue and inspect pending state, then resume runs a full gate and
 completes that version's commit. It requires the original HEAD and pending version
-to match; unexpected history changes require manual inspection. Do not rerun an
+to match. If it cannot (HEAD moved, for example because the fix needed its own
+commit) and nothing reached the remote, `tools/bump --abandon` drops the pending
+release: it removes the unpushed bump commit while HEAD is still that commit, or
+restores an uncommitted version file, and lists other changed files. Do not rerun an
 ordinary bump. Release requires a
 message and stops at each failed stage. Each stage is skipped when its work is
 already done: no commit without pending changes, no bump when HEAD is the
