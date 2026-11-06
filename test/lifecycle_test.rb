@@ -136,7 +136,19 @@ module LifecycleContract
     assert_equal '1.2.6', current_version
   end
 
-  # A release with nothing pending skips tools/commit, whose `git commit`
+# --no-install publishes as usual and leaves declared targets alone.
+def test_release_no_install_publishes_without_installing
+  target = File.join(@tmp, 'installed/fixture')
+  setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
+  add_remote
+  write('change.txt', 'hello')
+  assert_match(/--no-install: installation skipped/, succeeds('release', '--no-install', 'fix: no install'))
+  assert_equal '1.2.4', current_version
+  assert_equal git('rev-parse', 'HEAD').strip, git('ls-remote', 'origin', 'refs/heads/main').split.first
+  refute File.exist?(target)
+end
+
+# A release with nothing pending skips tools/commit, whose `git commit`
   # would fail on a clean tree, and still bumps, publishes and installs.
   def test_release_from_clean_tree_skips_commit
     target = File.join(@tmp, 'installed/fixture')

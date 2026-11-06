@@ -48,7 +48,7 @@ Set `TOOLS` overrides when an executable is not on PATH. Additional `FAST_CHECKS
 
 ## Migration from the old templates
 
-Replace the entry points together with their helpers; do not mix old and new script versions. Commits are local, bumps always perform full checks, and install targets must be declared. Bumps no longer install automatically. Use positional `major`/`minor`/`patch` instead of legacy flags, and note that `release` always runs the installer (skipped when no targets are declared); `--install` is accepted but redundant. Outside a release, artifacts stay inside the repository until the explicit installer copies them.
+Replace the entry points together with their helpers; do not mix old and new script versions. Commits are local, bumps always perform full checks, and install targets must be declared. Bumps no longer install automatically. Use positional `major`/`minor`/`patch` instead of legacy flags, and note that `release` runs the installer by default (skipped with `--no-install` or when no targets are declared); `--install` is accepted but redundant. Outside a release, artifacts stay inside the repository until the explicit installer copies them.
 
 The `--strict` analyzer option remains accepted, but failures now always exit nonzero. No analyzer is silently skipped or installed by a gate. Reconcile project-specific checks, version generation, and existing installation targets in settings before replacing scripts.
 ## Cargo layouts and milestone suites

@@ -512,7 +512,7 @@ module Tooling
           'inspect, then use tools/bump --resume or push it'
   end
 
-  def release(message)
+  def release(message, install: true)
     published = false
     upstream
     version
@@ -527,6 +527,7 @@ module Tooling
       script('bump')
     end
     published = true
+    return puts('--no-install: installation skipped.') unless install
     return puts('No INSTALL_TARGETS declared; installation skipped.') if ToolSettings::INSTALL_TARGETS.empty?
 
     script('install')

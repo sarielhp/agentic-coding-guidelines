@@ -152,7 +152,19 @@ class LifecycleTest < ToolFixture
 
   # A release with nothing pending skips tools/commit, whose `git commit`
   # would fail on a clean tree, and still bumps, publishes and installs.
-  def test_release_from_clean_tree_skips_commit
+# --no-install publishes as usual and leaves declared targets alone.
+def test_release_no_install_publishes_without_installing
+  target = File.join(@tmp, 'installed/app')
+  setting('INSTALL_TARGETS', "{ 'bin/app' => #{target.inspect} }.freeze")
+  add_remote
+  write('change.txt', 'hello')
+  assert_match(/--no-install: installation skipped/, succeeds('release', '--no-install', 'fix: no install'))
+  assert_equal "1.2.4\n", File.read(File.join(@repo, 'VERSION'))
+  assert_equal command('rev-parse', 'HEAD').strip, command('ls-remote', 'origin', 'refs/heads/main').split.first
+  refute File.exist?(target)
+end
+
+def test_release_from_clean_tree_skips_commit
     target = File.join(@tmp, 'installed/app')
     setting('INSTALL_TARGETS', "{ 'bin/app' => #{target.inspect} }.freeze")
     add_remote
