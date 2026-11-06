@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'tmp_env'
 require_relative 'tooling_fixture'
 
 module LifecycleContract
@@ -136,19 +137,19 @@ module LifecycleContract
     assert_equal '1.2.6', current_version
   end
 
-# --no-install publishes as usual and leaves declared targets alone.
-def test_release_no_install_publishes_without_installing
-  target = File.join(@tmp, 'installed/fixture')
-  setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
-  add_remote
-  write('change.txt', 'hello')
-  assert_match(/--no-install: installation skipped/, succeeds('release', '--no-install', 'fix: no install'))
-  assert_equal '1.2.4', current_version
-  assert_equal git('rev-parse', 'HEAD').strip, git('ls-remote', 'origin', 'refs/heads/main').split.first
-  refute File.exist?(target)
-end
+  # --no-install publishes as usual and leaves declared targets alone.
+  def test_release_no_install_publishes_without_installing
+    target = File.join(@tmp, 'installed/fixture')
+    setting('INSTALL_TARGETS', "{ #{artifact.inspect} => #{target.inspect} }.freeze")
+    add_remote
+    write('change.txt', 'hello')
+    assert_match(/--no-install: installation skipped/, succeeds('release', '--no-install', 'fix: no install'))
+    assert_equal '1.2.4', current_version
+    assert_equal git('rev-parse', 'HEAD').strip, git('ls-remote', 'origin', 'refs/heads/main').split.first
+    refute File.exist?(target)
+  end
 
-# A release with nothing pending skips tools/commit, whose `git commit`
+  # A release with nothing pending skips tools/commit, whose `git commit`
   # would fail on a clean tree, and still bumps, publishes and installs.
   def test_release_from_clean_tree_skips_commit
     target = File.join(@tmp, 'installed/fixture')
@@ -225,6 +226,34 @@ end
     out, err, status = Open3.capture3(@env, 'make', 'check', chdir: @repo)
     assert status.success?, "#{out}#{err}"
     assert_equal(1, trace.count { |row| row.first == auditor })
+  end
+
+  # Temporary files go under <tmpdir>/<user>/<project>/: the gate rejects a
+  # direct temporary directory in a tool unless the line is marked, and tests
+  # run with TMPDIR and XDG_CACHE_HOME inside the tree.
+  def test_temporary_files_stay_in_the_project_tree
+    write('tools/scratch', "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\nDir.mktmpdir(\"x\") { nil }\n")
+    assert_match(%r{temporary files outside .*tools/scratch:4: Dir\.mktmpdir}m, fails('gate'))
+    write('tools/scratch', "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\nDir.mktmpdir(\"x\") { nil } # tmp-exempt: fixture\n")
+    succeeds('gate')
+    trace_file = File.join(@tmp, 'tmpdir-trace')
+    if self.class::LANGUAGE == 'ruby'
+      write('test/tmpdir_test.rb', <<~'TEST')
+        require 'minitest/autorun'
+        class TmpdirTest < Minitest::Test
+          def test_tmpdir
+            File.write(ENV.fetch('TMPDIR_TRACE'), "#{ENV['TMPDIR']}\n#{ENV['XDG_CACHE_HOME']}")
+            assert true
+          end
+        end
+      TEST
+    end
+    succeeds('test', env: { 'TMPDIR_TRACE' => trace_file })
+    tmpdir, cache = File.read(trace_file).lines(chomp: true)
+    run_dir = File.dirname(tmpdir)
+    assert run_dir.start_with?(File.join(Dir.tmpdir, ProjectTmp.user_name, 'app with spaces', 'test-run', '')), run_dir
+    assert_equal [File.join(run_dir, 'tmp'), File.join(run_dir, 'cache')], [tmpdir, cache]
+    refute File.exist?(run_dir), 'the test run directory is removed afterwards'
   end
 
   def test_ignored_inputs_invalidate_resume_verification

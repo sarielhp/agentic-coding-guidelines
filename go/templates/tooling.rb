@@ -5,6 +5,7 @@ require 'fileutils'
 require 'json'
 require 'open3'
 require_relative 'settings'
+require_relative 'tmp_space'
 
 # Copied beside the entry points; no runtime dependency on the standards checkout.
 module Tooling
@@ -13,6 +14,14 @@ module Tooling
   DEEP_TOOLS = %w[govulncheck gocritic shadow revive dupl].freeze
 
   HELP_FLAGS = %w[-h --help].freeze
+  # Direct uses of the system temporary directory: a base directory must be
+  # given (os.MkdirTemp(base, ...)); tests may use t.TempDir() and the like,
+  # since the gate points TMPDIR into the project's tree.
+  GO_TEMP_CALLS = Regexp.union(
+    /os\.(?:MkdirTemp|CreateTemp)\(\s*""|os\.TempDir\(\)/,
+    /ioutil\.Temp(?:Dir|File)\(\s*""/,
+    %r{"/tmp\b} # tmp-exempt: the pattern itself
+  )
 
   module_function
 
@@ -20,11 +29,33 @@ module Tooling
     Dir.chdir(File.realpath(File.expand_path('..', __dir__)))
     abort 'go.mod missing; adapt these tools in a Go repository' unless File.file?('go.mod')
     ENV['PATH'] = search_paths.join(File::PATH_SEPARATOR)
+    ProjectTmp.project = setting(:PROJECT_NAME, nil) || File.basename(Dir.pwd)
     # go.mod decides the Go version: auto runs the newer of the local Go and
     # the toolchain line, downloading it when needed. A GOTOOLCHAIN=local in
     # the environment or in go env would quietly build with whatever is
     # installed, and govulncheck then reports that Go's standard library.
     ENV['GOTOOLCHAIN'] = 'auto'
+  end
+
+  # Ruby programs in tools/; settings.rb is configuration (install
+  # destinations, tool paths) and creates nothing.
+  def tool_scripts
+    Dir.glob('tools/*').select do |path|
+      next false if path == 'tools/settings.rb'
+
+      File.file?(path) && (path.end_with?('.rb') || File.open(path, &:gets).to_s.match?(/\A#!.*ruby/))
+    end
+  end
+
+  # Temporary files go under <tmpdir>/<user>/<project>/ (see tmp_space.rb).
+  def check_temporary_files
+    go_files = Dir.glob('**/*.go').reject { |path| path.start_with?('vendor/') }
+    found = ProjectTmp.offenders(tool_scripts, ProjectTmp::RUBY_CALLS, comment: /#.*/) +
+            ProjectTmp.offenders(go_files, GO_TEMP_CALLS, comment: %r{//.*}, test_file: ->(path) { path.end_with?('_test.go') })
+    return if found.empty?
+
+    raise "temporary files outside <tmpdir>/<user>/#{ProjectTmp.project}/ (use a base directory under it, " \
+          "or mark the line `tmp-exempt: <reason>`):\n#{found.uniq.join("\n")}"
   end
 
   # A settings constant, or default when a project's settings.rb predates it.
@@ -233,10 +264,11 @@ module Tooling
 
     run(executable('go'), 'mod', 'tidy', '-diff')
     script('lint')
+    check_temporary_files
     ToolSettings::FAST_CHECKS.each { |args| run(*args) }
-    run(executable('go'), 'test', '-timeout', ToolSettings::TEST_TIMEOUT, './...')
+    ProjectTmp.with_test_env { run(executable('go'), 'test', '-timeout', ToolSettings::TEST_TIMEOUT, './...') }
     if full
-      run(executable('go'), 'test', '-race', '-timeout', ToolSettings::TEST_TIMEOUT, './...')
+      ProjectTmp.with_test_env { run(executable('go'), 'test', '-race', '-timeout', ToolSettings::TEST_TIMEOUT, './...') }
       deep_review
       ToolSettings::FULL_CHECKS.each { |args| run(*args) }
     end

@@ -56,12 +56,26 @@ Rather than a blanket line limit, method thresholds are tiered by architectural 
   - Always pass multi-argument arrays to `Open3.capture2`, `Open3.capture3`, `system`, or `Process.spawn` (e.g. `system('git', 'checkout', branch)`).
   - Never interpolate unsanitized strings into shell commands (`system("cmd #{arg}")`). If shell evaluation is mandatory, sanitize with `Shellwords.escape`.
 - **Resource Lifecycle in `ensure` Blocks**:
-  - Temporary files, locks, background PTYs, and working directory state must be guaranteed cleanup within `ensure` blocks.
+  - Temporary files, locks, background PTYs, and working directory state must be guaranteed cleanup within `ensure` blocks (or the block forms that clean up, such as `ProjectTmp.mktmpdir`).
 - **Data vs. Logic Separation**:
   - Large lookup tables, regular expressions, explanation dictionaries, and configuration mappings must live in frozen module or class constants (`.freeze`), never instantiated inside method bodies.
 - **Type Safety & Nil Hygiene**:
   - Use safe navigation (`&.`) when values may legitimately be nil (`user&.name`).
   - Use predicate methods ending in `?` (`valid?`, `empty?`) and mutating or exception-raising variants ending in `!` (`save!`, `normalize!`).
+
+### Temporary Files
+- Create temporary files and directories only through `ProjectTmp`
+  (`tools/tmp_space.rb`, copied into the project's own code when it needs
+  one): `ProjectTmp.mktmpdir('purpose') { |dir| ... }` or
+  `ProjectTmp.dir('purpose')`. Everything lands under
+  `<tmpdir>/<user>/<project>/`; see the standards README, "Temporary and cached files".
+- Never call `Dir.mktmpdir`, `Dir.tmpdir` or `Tempfile` directly, and never name
+  a literal `/tmp` path. Tests may use `Dir.mktmpdir`: `tools/test` points
+  `TMPDIR` into the tree. A justified exception carries `# tmp-exempt: <reason>`.
+- A file reused across runs to save work is a cache, not a temporary file: it goes
+  under `$XDG_CACHE_HOME/<project>/` (default `~/.cache/<project>/`) via
+  `ProjectTmp.cache_dir(purpose)`, is removed by the project's own policy, and
+  holds nothing that cannot be recreated.
 
 ### Memory & Performance Hygiene
 - **Immutable String Deduplication**: Include `# frozen_string_literal: true` at the top of every Ruby file.

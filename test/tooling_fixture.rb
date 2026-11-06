@@ -15,6 +15,7 @@ class ToolingFixture < Minitest::Test
     require 'fileutils'
     tool = File.basename($PROGRAM_NAME)
     File.open(ENV.fetch('TRACE'), 'a') { |file| file.puts(JSON.generate([tool, *ARGV])) }
+    File.write(ENV['TMPDIR_TRACE'], "#{ENV['TMPDIR']}\n#{ENV['XDG_CACHE_HOME']}") if ENV['TMPDIR_TRACE'] && %w[cargo julia].include?(tool)
     abort 'injected failure' if ENV['FAIL'] == "#{tool}:#{ARGV.first}" || ENV['FAIL'] == tool
     if tool == 'git'
       if ARGV.first == 'ls-remote' && ENV['REMOTE_MISMATCH'] == '1'
@@ -98,7 +99,7 @@ class ToolingFixture < Minitest::Test
   def copy_templates
     Dir.glob(File.join(ROOT, self.class::LANGUAGE, 'templates/*.rb')).each do |source|
       name = File.basename(source)
-      name = name.delete_suffix('.rb') unless %w[settings.rb tooling.rb language.rb].include?(name)
+      name = name.delete_suffix('.rb') unless %w[settings.rb tooling.rb language.rb tmp_space.rb].include?(name)
       target = File.join(@repo, 'tools', name)
       FileUtils.cp(source, target)
       File.chmod(0o755, target)

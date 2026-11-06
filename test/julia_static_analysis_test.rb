@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'tmp_env'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'

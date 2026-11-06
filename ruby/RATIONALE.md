@@ -136,3 +136,21 @@ A successful local commit says nothing about remote publication. Checking every 
 HEAD alone does not identify checked code. Dirty sources, ignored configuration, generated version files, tool changes, and environment can alter the result. Structured verification binds the checked inputs and check level; release bumps always run full checks after version and lock changes. Checks must not rewrite those inputs.
 
 Build, gate, publication, and installation have different effects. Separating them keeps routine checking inside the repository and makes installation an explicit action against declared artifacts and destinations. Content and permission verification avoids running arbitrary installed programs merely to determine whether copying worked.
+
+## Temporary Files Live in One Tree per Project
+
+A program that creates its temporary files directly in the system temporary
+directory leaves one entry per run there, and an interrupted run leaves it for
+good: one project here had left over two hundred directories (113 MB) of
+retained test results in `/tmp`. Fixed names collide between parallel runs and
+between projects; predictable names in a shared, writable directory can be
+planted by another user. One private tree per user and project,
+`<tmpdir>/<user>/<project>/`, swept of entries older than 24 hours whenever a
+temporary directory is made, bounds the garbage, keeps runs apart and refuses
+a planted directory. Routing tests through `TMPDIR` covers the language's own
+calls and every program a test starts without touching test code. The rule is
+enforced by the gate because a convention that is only written down erodes
+with every new script. A cache is different: it exists to survive runs, so it
+lives in `$XDG_CACHE_HOME/<project>/` under the project's own invalidation
+policy, where a 24-hour sweep would only destroy the work it saves. See the
+standards README, "Temporary and cached files".

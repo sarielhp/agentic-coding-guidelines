@@ -22,7 +22,7 @@ class GatesTest < ToolFixture
     outside = File.join(@tmp, 'outside')
     FileUtils.mkdir_p(outside)
     File.symlink(outside, File.join(@repo, 'escape'))
-    ['../escaped', '/tmp/escaped', 'escape/app'].each do |path|
+    ['../escaped', '/tmp/escaped', 'escape/app'].each do |path| # tmp-exempt: paths that must be refused; creates nothing
       setting('ARTIFACTS', "{ #{path.inspect} => '.' }.freeze")
       reset_trace
       assert_match(/repository/, fails('build'))

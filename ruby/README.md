@@ -4,17 +4,17 @@
 
 `bin/ruby-audit` is the standalone AST auditor. `bin/ruby-static-analysis` runs syntax, RuboCop, and scoped dependency/clone review. Keep `bin/analysis_support.rb` beside the wrapper. `ruby-install-tools --check-only` audits without creating directories and exits nonzero when required gems are missing. The installer adds Ruby-capable [Flay](https://github.com/seattlerb/flay) to the development gem list. Bootstrap or symlink installation requires separate authorization; gates never install tools.
 
-`templates/` contains entry points, copied helpers (`tooling.rb`, `language.rb`), `settings.rb`, `AGENTS_SNIPPET.md`, `Makefile.snippet`, and `dot_rubocop.yml`. Shared portable acceptance tests live in `../test/`.
+`templates/` contains entry points, copied helpers (`tooling.rb`, `language.rb`, `tmp_space.rb`), `settings.rb`, `AGENTS_SNIPPET.md`, `Makefile.snippet`, and `dot_rubocop.yml`. Shared portable acceptance tests live in `../test/`.
 
 ## Adopt the workflow
 
-Copy every Ruby template, preserving `.rb` on `settings.rb`, `tooling.rb`, and `language.rb`. Entry points are installed without `.rb`:
+Copy every Ruby template, preserving `.rb` on `settings.rb`, `tooling.rb`, `language.rb`, and `tmp_space.rb`. Entry points are installed without `.rb`:
 
 ```bash
 rtk proxy mkdir -p tools
 for source in ~/prog/standards/ruby/templates/*.rb; do
   name=${source##*/}
-  case "$name" in settings.rb|tooling.rb|language.rb) ;; *) name=${name%.rb} ;; esac
+  case "$name" in settings.rb|tooling.rb|language.rb|tmp_space.rb) ;; *) name=${name%.rb} ;; esac
   rtk proxy cp "$source" "tools/$name"
 done
 rtk proxy chmod +x tools/build tools/lint tools/test tools/gate tools/check tools/snapshot tools/commit tools/bump tools/install tools/release

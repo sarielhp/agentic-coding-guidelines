@@ -19,6 +19,7 @@ This directory defines the authoritative architecture, cognitive complexity boun
     ├── AGENTS_SNIPPET.md   # Agent command forms and authorization boundaries
     ├── settings.rb         # Explicit project adaptation choices
     ├── tooling.rb          # Copied shared implementation (no live checkout dependency)
+    ├── tmp_space.rb        # Copied temporary-file helper (README, "Temporary and cached files")
     ├── build.rb            # Artifact-only build for root apps, libraries, cmd layouts
     ├── gate.rb / check.rb  # One fast/full quality gate implementation
     ├── lint.rb             # Vet, baseline staticcheck, strict cognitive audit
@@ -51,6 +52,7 @@ for t in build gate check lint snapshot commit bump install release; do
 done
 cp ~/prog/standards/go/templates/settings.rb tools/settings.rb
 cp ~/prog/standards/go/templates/tooling.rb tools/tooling.rb
+cp ~/prog/standards/go/templates/tmp_space.rb tools/tmp_space.rb
 ```
 
 `tools/check` loads `tools/gate`; alternatively use a `check -> gate` symlink.

@@ -120,3 +120,21 @@ Considered and not required: CodeComplexity.jl (a young package providing cyclom
 - [SciML Style Guide](https://docs.sciml.ai/SciMLStyle/stable) (style, type piracy, mutation naming, imports, tests)
 - [Modern Julia Workflows: optimizing](https://modernjuliaworkflows.org/optimizing/) (type stability tooling)
 - [CodeComplexity.jl](https://github.com/charleskawczynski/CodeComplexity.jl), [JET.jl](https://github.com/aviatesk/JET.jl), [ExplicitImports.jl](https://github.com/JuliaTesting/ExplicitImports.jl), [Aqua.jl](https://github.com/JuliaTesting/Aqua.jl), [JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl)
+
+## Temporary Files Live in One Tree per Project
+
+A program that creates its temporary files directly in the system temporary
+directory leaves one entry per run there, and an interrupted run leaves it for
+good: one project here had left over two hundred directories (113 MB) of
+retained test results in `/tmp`. Fixed names collide between parallel runs and
+between projects; predictable names in a shared, writable directory can be
+planted by another user. One private tree per user and project,
+`<tmpdir>/<user>/<project>/`, swept of entries older than 24 hours whenever a
+temporary directory is made, bounds the garbage, keeps runs apart and refuses
+a planted directory. Routing tests through `TMPDIR` covers the language's own
+calls and every program a test starts without touching test code. The rule is
+enforced by the gate because a convention that is only written down erodes
+with every new script. A cache is different: it exists to survive runs, so it
+lives in `$XDG_CACHE_HOME/<project>/` under the project's own invalidation
+policy, where a 24-hour sweep would only destroy the work it saves. See the
+standards README, "Temporary and cached files".

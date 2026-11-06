@@ -46,3 +46,10 @@ approval review enabled. Bootstrap the analysis packages separately, when author
 
 Before any refactor of numerical code, record the outputs on fixed inputs and require
 bit-identical results afterwards; a result change is its own deliberate commit.
+
+Create every temporary file under `<tmpdir>/<user>/<project>/` (standards README,
+"Temporary and cached files"): through `ProjectTmp` (`tools/tmp_space.rb`) in Ruby, or the
+language's call with an explicit base under that tree. Never use the system
+temporary directory directly or name a literal `/tmp` path; the gate rejects it
+unless the line says `tmp-exempt: <reason>`. Files reused across runs are caches,
+not temporary files: put them under `$XDG_CACHE_HOME/<project>/`.

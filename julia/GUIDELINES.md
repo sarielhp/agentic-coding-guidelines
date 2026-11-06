@@ -93,6 +93,19 @@ Length counts **code lines of the body**: blank lines, comment-only lines, the s
 
 ---
 
+### Temporary Files
+- Create temporary files and directories under
+  `joinpath(tempdir(), <user>, <project>, <purpose>)` (`0700`) with an explicit
+  parent: `mktempdir(base)`, `mktemp(base)`. Make that base in one helper, the
+  only line that calls `tempdir()` (`# tmp-exempt: the helper`); see the
+  standards README, "Temporary and cached files".
+- Never call `mktempdir()`, `mktemp()` or `tempname()` without a parent, and
+  never name a literal `/tmp` path. Tests (`test/`) may: `tools/test` points
+  `TMPDIR` into the tree.
+- A file reused across runs to save work is a cache, not a temporary file: it goes
+  under `$XDG_CACHE_HOME/<project>/` (default `~/.cache/<project>/`), is removed
+  by the project's own policy, and holds nothing that cannot be recreated.
+
 ## 5. Testing & Numerical Regression
 
 - `test/runtests.jl` only includes other test files; each file runs standalone and seeds any random generator it uses.

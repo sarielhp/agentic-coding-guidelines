@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'tmp_env'
 require_relative 'tooling_fixture'
 
 module AnalyzerContract

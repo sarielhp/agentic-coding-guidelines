@@ -14,5 +14,5 @@ TEXT
 
 Tooling.entry(HELP) do
   abort 'Usage: tools/test' unless ARGV.empty?
-  Language.test
+  ProjectTmp.with_test_env { Language.test }
 end

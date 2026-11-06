@@ -4,6 +4,14 @@ module Language
   SECTION = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/
   VERSION_ASSIGNMENT = /^\s*version\s*=\s*(?<quote>['"])(?<value>[^'"\n]+)\k<quote>\s*(?:#.*)?$/
   FULL_TOOLS = %w[cargo-audit cargo-deny cargo-machete].freeze
+  # Direct uses of the system temporary directory (see Tooling.check_temporary_files):
+  # a base directory must be given (tempdir_in, Builder::tempdir_in, ...).
+  TEMP_CALLS = Regexp.union(
+    /env::temp_dir\(\)|tempfile::(?:tempdir|tempfile)\(\)/,
+    /(?:NamedTempFile|TempDir)::new\(\)|\.(?:tempdir|tempfile)\(\)/,
+    %r{"/tmp\b} # tmp-exempt: the pattern itself
+  )
+  COMMENT = %r{//.*}
 
   module_function
 
@@ -18,6 +26,15 @@ module Language
     end
 
     ENV['CARGO_TARGET_DIR'] = Tooling.contained_path(ToolSettings::TARGET_DIR)
+  end
+
+  def temp_policy_files
+    Dir.glob('{src,tests,benches,examples}/**/*.rs') + Dir.glob('build.rs')
+  end
+
+  # Integration tests and benches; unit tests inside src/ follow the program rules.
+  def test_file?(path)
+    path.start_with?('tests/', 'benches/')
   end
 
   def tool_paths

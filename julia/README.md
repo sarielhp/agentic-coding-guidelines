@@ -48,8 +48,8 @@ julia-install-tools                # install into the tools environment (require
 shared `tooling.rb` (kept byte-identical across the three), with Julia's specifics in
 `language.rb` and `settings.rb`: `build`, `gate`/`check`, `lint`, `test`, `snapshot`,
 `commit`, `bump`, `release`, `install`, and the Julia-only `publish`. Copy them into a
-project's `tools/`, dropping the `.rb` suffix except on `tooling.rb`, `language.rb` and
-`settings.rb`. Every script answers `-h`/`--help` and runs nothing.
+project's `tools/`, dropping the `.rb` suffix except on `tooling.rb`, `language.rb`, `tmp_space.rb`
+and `settings.rb`. Every script answers `-h`/`--help` and runs nothing.
 
 | Step | What it does |
 |---|---|

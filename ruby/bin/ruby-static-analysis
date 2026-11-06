@@ -4,6 +4,8 @@
 require 'optparse'
 require 'tempfile'
 require File.join(__dir__, 'analysis_support')
+require File.join(__dir__, '..', '..', 'ruby', 'templates', 'tmp_space')
+ProjectTmp.project = 'standards'
 
 STANDARDS_RUBOCOP = File.expand_path('../templates/dot_rubocop.yml', __dir__)
 selected = []
@@ -45,7 +47,7 @@ begin
     if project_config
       config = ['--config', project_config]
     else
-      temporary_config = Tempfile.new(['ruby-review', '.yml'])
+      temporary_config = Tempfile.new(['ruby-review', '.yml'], ProjectTmp.dir('ruby-static-analysis')) # tmp-exempt: inside ProjectTmp.dir
       version = RUBY_VERSION.split('.').first(2).join('.')
       temporary_config.write("inherit_from: #{STANDARDS_RUBOCOP}\nAllCops:\n  TargetRubyVersion: #{version}\n")
       temporary_config.flush

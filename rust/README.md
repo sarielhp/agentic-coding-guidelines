@@ -4,17 +4,17 @@
 
 `bin/rust-audit` is the standalone sizing/idiom auditor. `bin/rust-static-analysis` runs required Clippy, cargo-audit, cargo-deny, and cargo-machete review; flags select individual checks. `bin/analysis_support.rb` must remain beside the wrapper. `rust-install-tools` is the separately invoked tool bootstrapper. Run them by absolute path or explicitly authorize symlink installation into `~/bin`; this workflow does not install them automatically.
 
-`templates/` contains the entry points, copied `tooling.rb`/`language.rb` helpers, `settings.rb`, `AGENTS_SNIPPET.md`, `Makefile.snippet`, and optional `clippy.toml`. Portable shared acceptance tests live in `../test/`.
+`templates/` contains the entry points, copied `tooling.rb`/`language.rb`/`tmp_space.rb` helpers, `settings.rb`, `AGENTS_SNIPPET.md`, `Makefile.snippet`, and optional `clippy.toml`. Portable shared acceptance tests live in `../test/`.
 
 ## Adopt the workflow
 
-Copy every Ruby template, preserving `.rb` on `settings.rb`, `tooling.rb`, and `language.rb`. Entry points are installed without `.rb`:
+Copy every Ruby template, preserving `.rb` on `settings.rb`, `tooling.rb`, `language.rb`, and `tmp_space.rb`. Entry points are installed without `.rb`:
 
 ```bash
 rtk proxy mkdir -p tools
 for source in ~/prog/standards/rust/templates/*.rb; do
   name=${source##*/}
-  case "$name" in settings.rb|tooling.rb|language.rb) ;; *) name=${name%.rb} ;; esac
+  case "$name" in settings.rb|tooling.rb|language.rb|tmp_space.rb) ;; *) name=${name%.rb} ;; esac
   rtk proxy cp "$source" "tools/$name"
 done
 rtk proxy chmod +x tools/build tools/lint tools/test tools/gate tools/check tools/snapshot tools/commit tools/bump tools/install tools/release

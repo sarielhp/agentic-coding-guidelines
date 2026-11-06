@@ -2,8 +2,9 @@
 # frozen_string_literal: true
 
 require 'English'
-require 'etc'
 require 'fileutils'
+require File.join(__dir__, '..', '..', 'ruby', 'templates', 'tmp_space')
+ProjectTmp.project = 'standards'
 
 # Format LaTeX sources with tex-fmt using an embedded standard configuration.
 module LatexIndent
@@ -35,15 +36,8 @@ module LatexIndent
     end
   end
 
-  def current_username
-    Etc.getlogin || ENV['USER'] || ENV['LOGNAME'] || 'user'
-  rescue StandardError
-    ENV['USER'] || ENV['LOGNAME'] || 'user'
-  end
-
   def cached_config_path
-    dir = File.join('/tmp', current_username, 'latex_indent')
-    FileUtils.mkdir_p(dir)
+    dir = ProjectTmp.cache_dir('latex_indent')
     cache_path = File.join(dir, 'tex-fmt.toml')
     File.write(cache_path, EMBEDDED_CONFIG) unless File.file?(cache_path) && File.read(cache_path) == EMBEDDED_CONFIG
     cache_path

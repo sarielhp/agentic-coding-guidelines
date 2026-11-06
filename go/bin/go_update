@@ -141,7 +141,7 @@ end
 def install(release)
   previous = current_version
   FileUtils.mkdir_p(SDK)
-  Dir.mktmpdir('go_update-', SDK) do |scratch|
+  Dir.mktmpdir('go_update-', SDK) do |scratch| # tmp-exempt: inside the SDK directory, renamed into place
     puts "downloading #{release[:filename]}"
     unpack(release, download(release, scratch), scratch)
   end

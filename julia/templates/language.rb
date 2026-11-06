@@ -4,6 +4,10 @@ module Language
   SECTION = /^\s*\[/
   VERSION_ASSIGNMENT = /^\s*version\s*=\s*"(?<value>[^"\n]+)"\s*(?:#.*)?$/
   PACKAGE_KEYS = /^\s*(name|uuid)\s*=/
+  # Direct uses of the system temporary directory (see Tooling.check_temporary_files):
+  # a parent directory must be given (mktempdir(parent), mktemp(parent), ...).
+  TEMP_CALLS = %r{\b(?:mktempdir|mktemp|tempname)\(\s*[;)]|\btempdir\(\s*\)|"/tmp\b} # tmp-exempt: the pattern itself
+  COMMENT = /#.*/
 
   module_function
 
@@ -13,6 +17,14 @@ module Language
 
   def setup
     raise 'Project.toml missing' unless File.file?('Project.toml')
+  end
+
+  def temp_policy_files
+    Dir.glob('{src,test,ext,bin}/**/*.jl') + Dir.glob('*.jl')
+  end
+
+  def test_file?(path)
+    path.start_with?('test/')
   end
 
   def tool_paths

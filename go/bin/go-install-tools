@@ -9,6 +9,8 @@
 
 require 'open3'
 require 'tmpdir'
+require File.join(__dir__, '..', '..', 'ruby', 'templates', 'tmp_space')
+ProjectTmp.project = 'standards'
 
 TOOLS = {
   'staticcheck' => 'honnef.co/go/tools/cmd/staticcheck@latest',
@@ -65,7 +67,7 @@ def install(binary, pkg, dir, toolchain)
   env['GOTOOLCHAIN'] = toolchain unless toolchain.empty?
   return go('install', pkg, env: env) unless LATEST_DEPS.key?(binary)
 
-  Dir.mktmpdir("#{binary}-build-") do |scratch|
+  ProjectTmp.mktmpdir('go-install-tools') do |scratch|
     steps = [%w[mod init scratch], ['get', pkg, *LATEST_DEPS.fetch(binary)], ['install', pkg.sub(/@.*\z/, '')]]
     result = nil
     steps.each do |args|

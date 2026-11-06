@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'etc'
+require_relative 'tmp_env'
 require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
@@ -59,14 +59,7 @@ class LatexToolsTest < Minitest::Test
   end
 
   def test_convention_checker_detects_violations
-    user = begin
-      Etc.getlogin
-    rescue StandardError
-      ENV['USER'] || 'user'
-    end
-    base_dir = "/tmp/#{user}/latex_test"
-    FileUtils.mkdir_p(base_dir)
-    Dir.mktmpdir('check-', base_dir) do |dir|
+    Dir.mktmpdir('check-') do |dir|
       bad_tex = File.join(dir, 'bad.tex')
       File.write(bad_tex, "\\bibliographystyle{plain}\n\\label{raw}\n$$x=1$$\n")
       out, _err, status = run_tool('latex_check_conventions', bad_tex)

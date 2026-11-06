@@ -68,6 +68,7 @@ agentic-coding-guidelines/
 │       ├── AGENTS_SNIPPET.md # Exact command forms and authorization boundaries
 │       ├── settings.rb      # Project artifact, check, version, and install choices
 │       ├── tooling.rb       # Copied shared implementation
+│       ├── tmp_space.rb     # Copied temporary-file helper (see "Temporary and cached files")
 │       ├── build.rb         # Repository artifacts for apps, libraries, cmd layouts
 │       ├── gate.rb/check.rb # One fast/full gate implementation
 │       ├── lint.rb          # Fast static checks
@@ -100,6 +101,7 @@ agentic-coding-guidelines/
 │   └── templates/            # Reusable project workflow templates
 │       ├── settings.rb      # Cargo layout, version, milestone and install settings
 │       ├── tooling.rb/language.rb # Copied lifecycle and Rust implementation
+│       ├── tmp_space.rb     # Copied temporary-file helper
 │       ├── AGENTS_SNIPPET.md # Exact commands and authorization boundaries
 │       ├── Makefile.snippet  # Delegates to canonical scripts
 │       └── *.rb             # build/lint/test/gate/check/snapshot/commit/bump/install/release
@@ -115,6 +117,7 @@ agentic-coding-guidelines/
 │   └── templates/            # Reusable project workflow templates
 │       ├── settings.rb      # Ruby scope, tests, version, artifact and install settings
 │       ├── tooling.rb/language.rb # Copied lifecycle and Ruby implementation
+│       ├── tmp_space.rb     # Copied temporary-file helper
 │       ├── AGENTS_SNIPPET.md # Exact commands and authorization boundaries
 │       ├── Makefile.snippet  # Delegates to canonical scripts
 │       ├── *.rb             # build/lint/test/gate/check/snapshot/commit/bump/install/release
@@ -126,6 +129,68 @@ agentic-coding-guidelines/
         ├── review_cycle.json # Standard repository contract template
         └── AGENTS_SNIPPET.md # Drop-in documentation block for AGENTS.md
 ```
+
+---
+
+## Temporary and cached files
+
+A project's files outside its repository are of two kinds, kept apart:
+
+| | Temporary file | Cached file |
+|---|---|---|
+| Purpose | Scratch space for one run: staging, unpacking, a sandbox, intermediate output | Saves work across runs: build directories, downloaded or computed results |
+| Valid until | The run ends (at most 24 hours, for inspection) | It is invalidated: its inputs changed, or the project is idle or gone |
+| Losing it costs | Nothing beyond the current run | Rework only, never data |
+| Location | `<tmpdir>/<user>/<project>/<purpose>/` | `$XDG_CACHE_HOME/<project>/` (default `~/.cache/<project>/`) |
+| Cleanup | The 24-hour sweep below | The project's own policy (for example leeni's `cache_days`) |
+
+Neither may hold anything that cannot be recreated; that belongs in the
+repository or in `$XDG_DATA_HOME/<project>/`. Lock files and other runtime state
+are temporary files: they mean nothing after a reboot, and the sweep never
+removes a lock a process holds. (`$XDG_RUNTIME_DIR` would fit them, but it is not
+set under cron, ssh or in containers.) `ProjectTmp.cache_dir(purpose)` returns
+`$XDG_CACHE_HOME/<project>/<purpose>/`.
+
+### Temporary files
+
+Every temporary file or directory a project creates — by its programs, its
+`tools/` scripts and its tests — lives under
+
+```
+<system temporary directory>/<user>/<project>/<purpose>/<unique name>
+```
+
+for example `/tmp/alice/leeni/zip-stage/20261106-143012-x1y2z3`. The project name
+is `PROJECT_NAME` in `tools/settings.rb`, or the repository directory's name.
+
+- **One entry per user and project.** Nothing is created directly in the system
+  temporary directory: a long, namespaced path keeps it from filling with one
+  entry per run, and keeps parallel runs and projects apart.
+- **Private.** The user directory must belong to the user and be closed to
+  writes by others; the project directory and every purpose directory are
+  `0700`. The names are predictable, so a directory planted by someone else is
+  refused, never used.
+- **Swept after 24 hours.** Making a temporary directory first removes entries
+  of the tree older than 24 hours, so an interrupted run never leaves garbage
+  for long. A lock file is kept while a process holds it. Old-style
+  `<tmpdir>/<project>_*` entries of the same user are swept by the same rule.
+- **Tests.** `tools/test` (and the Go gate) run the tests with `TMPDIR` and
+  `XDG_CACHE_HOME` pointing to fresh directories of the tree, removed afterwards,
+  so tests never write to the user's real cache either, and the language's own
+  calls in tests (`Dir.mktmpdir`, `t.TempDir()`, `tempfile::tempdir()`,
+  `mktempdir()`) and the programs tests start (compilers, `cargo`, `biber`, …)
+  stay inside it. Tests must not name a literal `/tmp` path.
+- **One helper.** `tools/tmp_space.rb` (`ProjectTmp`) implements the tree, the
+  sweep and the checks; Ruby projects copy it for their own code too. Go, Rust
+  and Julia code pass a base directory under the tree to the standard calls
+  (`os.MkdirTemp(base, …)`, `tempfile::Builder::new().tempdir_in(base)`,
+  `mktempdir(base)`).
+- **Enforced.** The gate rejects a line that uses the system temporary directory
+  directly (`Dir.mktmpdir`, `Tempfile`, `Dir.tmpdir`, `os.TempDir()`,
+  `env::temp_dir()`, `tempdir()`, a literal `/tmp` path, …) outside the helper.
+  A line may opt out only with a comment `tmp-exempt: <reason>`, for example a
+  temporary file written beside its target and renamed over it, or a path that
+  is only compared or looked up.
 
 ---
 

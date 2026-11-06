@@ -51,6 +51,18 @@ Rather than a blanket line limit, function thresholds are tiered by architectura
 
 ---
 
+### Temporary Files
+- Create temporary files and directories under
+  `filepath.Join(os.TempDir(), <user>, <project>, <purpose>)` (`0700`), with an
+  explicit base: `os.MkdirTemp(base, "x-")`, `os.CreateTemp(base, "x-")`. Make
+  that base in one helper, the only line that calls `os.TempDir()`
+  (`// tmp-exempt: the helper`); see the standards README, "Temporary and cached files".
+- Never pass `""` as the directory, and never name a literal `/tmp` path.
+  Tests may use `t.TempDir()`: the gate points `TMPDIR` into the tree.
+- A file reused across runs to save work is a cache, not a temporary file: it goes
+  under `$XDG_CACHE_HOME/<project>/` (default `~/.cache/<project>/`), is removed
+  by the project's own policy, and holds nothing that cannot be recreated.
+
 ## 5. Anti-Decomposition Rules for Agents
 
 When refactoring functions that exceed complexity limits, agents must follow strict decomposition discipline:
@@ -110,7 +122,7 @@ versioned releases. Unsupported commands fail clearly.
 
 ### Project Settings and Artifact Containment
 
-Copy `settings.rb` and `tooling.rb` beside the entry points; they have no runtime
+Copy `settings.rb`, `tooling.rb` and `tmp_space.rb` beside the entry points; they have no runtime
 dependency on this standards checkout. Adapt the explicit settings for build
 packages, artifact-to-package mappings, CLI layouts, installation targets,
 version storage, version update commands, and additional checks. The example

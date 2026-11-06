@@ -94,6 +94,19 @@ Rather than a blunt, naive line cap (which causes destructive slicing), function
 
 ---
 
+### Temporary Files
+- Create temporary files and directories under
+  `<env::temp_dir()>/<user>/<project>/<purpose>/` (`0700`) with an explicit
+  base: `tempfile::Builder::new().tempdir_in(base)`, `NamedTempFile::new_in(base)`.
+  Make that base in one helper, the only line that calls `env::temp_dir()`
+  (`// tmp-exempt: the helper`); see the standards README, "Temporary and cached files".
+- Never call `tempfile::tempdir()`, `TempDir::new()`, `NamedTempFile::new()` or
+  `env::temp_dir()` elsewhere, and never name a literal `/tmp` path.
+  Integration tests (`tests/`) may: `tools/test` points `TMPDIR` into the tree.
+- A file reused across runs to save work is a cache, not a temporary file: it goes
+  under `$XDG_CACHE_HOME/<project>/` (default `~/.cache/<project>/`), is removed
+  by the project's own policy, and holds nothing that cannot be recreated.
+
 ## 5. Anti-Decomposition Rules for Agents
 
 When refactoring functions that exceed complexity or line limits, AI agents must follow strict decomposition discipline:

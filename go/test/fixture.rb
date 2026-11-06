@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../../test/tmp_env'
 require 'fileutils'
 require 'json'
 require 'minitest/autorun'
@@ -97,7 +98,7 @@ class ToolFixture < Minitest::Test
   def copy_templates
     Dir.glob(File.join(TEMPLATES, '*.rb')).each do |source|
       name = File.basename(source)
-      name = name.delete_suffix('.rb') unless %w[settings.rb tooling.rb].include?(name)
+      name = name.delete_suffix('.rb') unless %w[settings.rb tooling.rb tmp_space.rb].include?(name)
       FileUtils.cp(source, File.join(@repo, 'tools', name))
       File.chmod(0o755, File.join(@repo, 'tools', name))
     end

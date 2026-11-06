@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 module ToolSettings
+  # Name of the project's temporary-file tree, <tmpdir>/<user>/<name>/; nil uses the
+  # repository directory's name.
+  PROJECT_NAME = nil
   TOOLS = {}.freeze
   TARGET_DIR = 'target'
   BUILD_ARGS = ['--workspace'].freeze

@@ -28,6 +28,8 @@ The standard tools are located in [tools/](tools/) and symlinked to `~/bin/`:
 - [tools/latex_check_conventions](tools/latex_check_conventions): Read-only static convention auditor. Verifies typed labels, BibLaTeX/Biber, label line layout, and figure structure.
 - [tools/tex_source.rb](tools/tex_source.rb): Shared LaTeX parser that strips comments and protects verbatim/listing environments.
 
+Like every program here, the tools keep temporary files (such as `latex_indent`'s cached `tex-fmt` configuration) under `<tmpdir>/<user>/standards/`; see the standards README, "Temporary and cached files".
+
 ### Starter Templates (`templates/`)
 Starter manuscript sources and templates are maintained in [templates/](templates/):
 - [templates/example.tex](templates/example.tex): Minimal starter paper illustrating standard structure and environments.

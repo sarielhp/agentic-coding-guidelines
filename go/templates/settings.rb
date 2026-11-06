@@ -2,6 +2,9 @@
 
 # Copy this file unchanged to tools/settings.rb, then adapt these project choices.
 module ToolSettings
+  # Name of the project's temporary-file tree, <tmpdir>/<user>/<name>/; nil uses the
+  # repository directory's name.
+  PROJECT_NAME = nil
   TOOLS = {}.freeze # Optional exact executable paths, e.g. { 'go-audit' => '/path/go-audit' }
   BUILD_PACKAGES = ['./...'].freeze
   # nil detects a root main package; {} explicitly selects a library.

@@ -24,3 +24,10 @@ releases, installations, or changes outside the task. Reuse authorization alread
 given in the session. Keep sandboxing and manual approval review enabled; these
 scripts do not change approval settings or writable roots. Bootstrap analysis
 tools separately when authorized. Never enlarge a baseline to hide a new finding.
+
+Create every temporary file under `<tmpdir>/<user>/<project>/` (standards README,
+"Temporary and cached files"): through `ProjectTmp` (`tools/tmp_space.rb`) in Ruby, or the
+language's call with an explicit base under that tree. Never use the system
+temporary directory directly or name a literal `/tmp` path; the gate rejects it
+unless the line says `tmp-exempt: <reason>`. Files reused across runs are caches,
+not temporary files: put them under `$XDG_CACHE_HOME/<project>/`.
