@@ -1,0 +1,372 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# git_latex_sync: commit, merge the remote's changes, compile-check, push.
+# Run with -h for the full description and workflow.
+
+require 'open3'
+require 'shellwords'
+
+$stdout.sync = true
+
+HELP_FLAGS = %w[-h -H --help -help --H --h].freeze
+USAGE = 'usage: git_latex_sync [--compile | --no-compile] | -info | -h'
+# Only main documents whose PDF was built within this many days are compiled.
+ACTIVE_DAYS = 14
+MAX_TRIES = 3
+HELP = <<~TXT.freeze
+  #{USAGE}
+
+  Keeps a LaTeX paper in sync with its git remote (Overleaf, GitHub, GitLab, ...)
+  without thinking about git. Run it whenever: when you start, every 30-60 minutes,
+  and when you stop. It works from anywhere inside the repo.
+
+  WHAT ONE RUN DOES
+    1. Commit. Stages everything (git add -A), so new files, deletions and renames
+       are included; .gitignore decides what is left out. New files that do not
+       look like paper sources (.tex .bib .sty .cls .bst .ipe .jl .rb .md .txt
+       .eps .svg .png .jpg, PDFs under figs/, .gitignore, Makefile) are listed and
+       committed only if you say yes. Files added (+, green), deleted (-, red) and
+       renamed (>) are listed. The commit is named "Auto-commit: <date time>".
+    2. Fetch and show what your coauthors pushed: their commits and a diffstat.
+    3. Merge their commits into yours (a merge, not a rebase: conflicts are
+       resolved once, not once per local auto-commit).
+    4. On conflicts, go through each conflicted file:
+         e  open $VISUAL/$EDITOR at the first conflict marker; it will not
+            continue while <<<<<<< ======= >>>>>>> markers remain
+         m  keep my version of the whole file
+         o  keep the other (remote) version of the whole file
+         d  show the conflict diff
+         a  abort: undo the merge; your work stays committed locally
+         q  quit for now; the merge stays in progress, rerun to resume
+       Without a terminal it stops at a conflict instead of asking.
+    5. Compile check, with leeni (l). By default only after a real merge (both
+       sides had new commits). It builds every top-level main .tex whose PDF was
+       built in the last #{ACTIVE_DAYS} days, and does not push a paper that
+       stopped compiling unless you confirm.
+    6. Push. If the remote changed meanwhile, merge again and retry (#{MAX_TRIES} tries).
+
+  OPTIONS
+    --compile      always run the compile check before pushing
+    --no-compile   never run it
+    -info          change nothing: show the remote (host and URL), the branch,
+                   whether the remote has commits you do not (and which), how
+                   many local commits are unpushed, and uncommitted changes
+    -h, --help     this message (also -H, -help, --h, --H)
+
+  WORKFLOW
+    once per clone:   git_latex_setup   (git config, .gitignore, remote check)
+    then, always:     git_latex_sync
+    to look first:    git_latex_sync -info
+    Tell coauthors which section you are working on, keep one sentence (or
+    clause) per line, and do not re-wrap paragraphs: git merges line by line.
+
+  SAFETY
+    Never force-pushes, never rewrites pushed history, never resolves a conflict
+    on its own. Refuses to run while a rebase is in progress (finish it with
+    git rebase --continue or undo it with git rebase --abort).
+TXT
+
+# Extensions committed without asking; anything else new is shown first (keep HELP in sync).
+SAFE_EXT = %w[.tex .bib .sty .cls .bst .ipe .jl .rb .md .txt .eps .svg .png .jpg].freeze
+SAFE_NAMES = %w[.gitignore Makefile].freeze
+MARKER = /^(?:<{7}|>{7})(?: |$)|^={7}$/n
+LOG_FMT = '  %h  %<(14,trunc)%an %<(15)%ar %s'
+
+def run(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  [out, status.success?]
+end
+
+def git(*) = run('git', *)
+
+def git!(*args)
+  out, ok = git(*args)
+  abort "git #{args.join(' ')} failed:\n#{out}" unless ok
+  out
+end
+
+def ask(prompt, choices, default = nil)
+  loop do
+    print "#{prompt} "
+    answer = $stdin.gets&.strip&.downcase
+    return default if answer.nil? || (answer.empty? && default)
+    return answer if choices.include?(answer)
+  end
+end
+
+def merging? = File.exist?(git!('rev-parse', '--git-path', 'MERGE_HEAD').chomp)
+
+def check_state
+  _, ok = git('rev-parse', '--abbrev-ref', '@{u}')
+  abort 'No upstream to sync with: run git_latex_setup, which explains how to add one.' unless ok
+  rebase = %w[rebase-merge rebase-apply].map { |d| git!('rev-parse', '--git-path', d).chomp }
+  return unless rebase.any? { |d| File.exist?(d) }
+
+  abort 'A rebase (from git pull / git sync) is in progress. Finish it with ' \
+        '`git rebase --continue`, or undo it with `git rebase --abort`, then rerun.'
+end
+
+# ---- committing -----------------------------------------------------------------
+
+def unusual_new_files
+  git!('ls-files', '--others', '--exclude-standard', '-z').split("\0").reject do |f|
+    SAFE_EXT.include?(File.extname(f).downcase) || SAFE_NAMES.include?(File.basename(f)) ||
+      (f.end_with?('.pdf') && f.split('/').include?('figs'))
+  end
+end
+
+def commit_local
+  odd = unusual_new_files
+  git!('add', '-A')
+  if odd.any?
+    puts('New files that do not look like paper sources:', odd.map { |f| "  #{f}" })
+    keep = $stdin.tty? && ask("Commit and push them to #{remote_label}? [y/N]", %w[y n], 'n') == 'y'
+    git!('reset', '-q', '--', *odd) unless keep
+    puts '  (left uncommitted; add a .gitignore pattern to silence this)' unless keep
+  end
+  _, clean = git('diff', '--cached', '--quiet')
+  report_file_changes unless clean
+  git!('commit', '-q', '-m', "Auto-commit: #{Time.now.strftime('%F %T')}") unless clean
+end
+
+# Lists files added, deleted or renamed by the commit (edits are not listed).
+# [sign, ANSI color] as in git: added/renamed green, deleted red.
+STATUS_SIGN = { 'A' => ['+', 32], 'D' => ['-', 31], 'R' => ['>', 32] }.freeze
+
+def paint(text, color) = $stdout.tty? ? "\e[#{color}m#{text}\e[0m" : text
+
+def report_file_changes
+  lines = git!('diff', '--cached', '--name-status', '-M').lines.filter_map do |line|
+    status, *paths = line.chomp.split("\t")
+    sign, color = STATUS_SIGN[status[0]]
+    paint("  #{sign} #{paths.join(' -> ')}", color) if sign
+  end
+  puts('Committing file changes:', lines) if lines.any?
+end
+
+# ---- merging --------------------------------------------------------------------
+
+# Fetches and merges Overleaf's changes. True when both sides had new commits.
+def merge_remote?
+  git!('fetch', '-q', 'origin')
+  incoming = git!('log', "--format=#{LOG_FMT}", 'HEAD..@{u}')
+  return false if incoming.empty?
+
+  puts "Coming from #{remote_label}:", incoming, git!('diff', '--stat', 'HEAD...@{u}')
+  ahead = git!('rev-list', '--count', '@{u}..HEAD').to_i
+  out, ok = git('merge', '--no-edit', '-q', git!('rev-parse', '--abbrev-ref', '@{u}').chomp)
+  abort "Merge failed:\n#{out}" unless ok || merging?
+  finish_merge unless ok
+  ahead.positive?
+end
+
+def finish_merge
+  resolve_conflicts
+  git!('commit', '-q', '--no-edit')
+  puts 'Merge committed.'
+end
+
+def conflicted = git!('diff', '--name-only', '--diff-filter=U', '-z').split("\0")
+
+def resolve_conflicts
+  abort("Conflicts in: #{conflicted.join(' ')}\nRun git_latex_sync in a terminal to resolve them.") unless $stdin.tty?
+  until (files = conflicted).empty?
+    puts "\n#{files.size} file(s) with conflicts: #{files.join(' ')}"
+    files.each { |f| resolve_file(f) }
+  end
+end
+
+def marker_lines(file)
+  return [] unless File.file?(file)
+
+  File.binread(file).each_line.with_index(1).filter_map { |l, i| i if l.match?(MARKER) }
+end
+
+FILE_PROMPT = '[e]dit  keep [m]ine  keep [o]ther side  [d]iff  [a]bort sync  [q]uit for now:'
+
+def resolve_file(file)
+  loop do
+    puts "\n== #{file}: #{marker_lines(file).size / 3} conflict block(s)"
+    case ask(FILE_PROMPT, %w[e m o d a q])
+    when 'e' then break if edit(file)
+    when 'm' then break take(file, '--ours')
+    when 'o' then break take(file, '--theirs')
+    when 'd' then system('git', '--no-pager', 'diff', '--color', '--', file)
+    when 'a' then abort_merge
+    else abort 'Merge left in progress. Run git_latex_sync again to resume.'
+    end
+  end
+end
+
+def edit(file)
+  editor = Shellwords.split(ENV['VISUAL'] || ENV['EDITOR'] || 'vi')
+  system(*editor, "+#{marker_lines(file).first || 1}", file)
+  left = marker_lines(file)
+  return git!('add', '--', file) if left.empty?
+
+  puts "  conflict markers remain at line(s) #{left.join(', ')}"
+  false
+end
+
+# In a merge, --ours is your side, --theirs is the remote's. A side that deleted the file wins as a delete.
+def take(file, side)
+  _, ok = git('checkout', side, '--', file)
+  ok ? git!('add', '--', file) : git!('rm', '-q', '--', file)
+end
+
+def abort_merge
+  git!('merge', '--abort')
+  abort 'Merge undone. Your work is committed locally, nothing was pushed.'
+end
+
+# ---- remote description -----------------------------------------------------------
+
+HOST_KINDS = { 'overleaf' => 'Overleaf', 'github' => 'GitHub', 'gitlab' => 'GitLab',
+               'bitbucket' => 'Bitbucket' }.freeze
+
+def upstream_remote
+  name, ok = git('config', "branch.#{git!('branch', '--show-current').chomp}.remote")
+  return name.chomp if ok
+
+  git!('remote').lines.first&.chomp
+end
+
+# Drops user[:token]@ from http(s) URLs so credentials are never printed.
+def display_url(url) = url.sub(%r{\A(https?://)[^@/]+@}, '\1')
+
+def url_host(url) = url[%r{\A(?:\w+://)?(?:[^@/]+@)?([^/:]+)}, 1].to_s
+
+def host_kind(host)
+  return 'the remote' if host.empty? # a local path or file:// URL
+
+  HOST_KINDS.find { |key, _| host.include?(key) }&.last || host
+end
+
+def remote_label
+  @remote_label ||= host_kind(url_host(git!('remote', 'get-url', upstream_remote).chomp))
+end
+
+# ---- -info ----------------------------------------------------------------------
+
+def info_remote
+  name = upstream_remote
+  return puts('Remote:   none (run git_latex_setup)') unless name
+
+  url = git!('remote', 'get-url', name).chomp
+  host = url_host(url)
+  base = host.empty? ? '' : " (https://#{host})"
+  puts "Remote:   #{name} -> #{host_kind(host)}#{base}", "URL:      #{display_url(url)}"
+  _, fetched = git('fetch', '-q', name)
+  puts '          (fetch failed: showing the last known remote state)' unless fetched
+end
+
+def info_branch
+  upstream, ok = git('rev-parse', '--abbrev-ref', '@{u}')
+  branch = git!('branch', '--show-current').chomp
+  return puts("Branch:   #{branch}, tracking nothing (run git_latex_setup)") unless ok
+
+  puts "Branch:   #{branch}, tracking #{upstream.chomp}"
+  incoming = git!('log', "--format=#{LOG_FMT}", 'HEAD..@{u}')
+  ahead = git!('rev-list', '--count', '@{u}..HEAD').to_i
+  puts(incoming.empty? ? 'Remote:   nothing new' : "Remote:   ahead by #{incoming.lines.size} commit(s):\n#{incoming}")
+  puts "Local:    #{ahead.zero? ? 'nothing unpushed' : "#{ahead} commit(s) not pushed yet"}"
+end
+
+def show_info
+  puts "Repo:     #{Dir.pwd}"
+  info_remote
+  info_branch
+  dirty = git!('status', '--porcelain').lines.size
+  puts "Changes:  #{dirty.zero? ? 'none uncommitted' : "#{dirty} uncommitted file(s)"}"
+  puts 'State:    MERGE IN PROGRESS (rerun git_latex_sync to resume)' if merging?
+end
+
+# ---- compiling and pushing ------------------------------------------------------
+
+def active_docs
+  git!('ls-files', '-z', ':(glob)*.tex').split("\0").select do |tex|
+    pdf = tex.sub(/\.tex\z/, '.pdf')
+    File.exist?(pdf) && Time.now - File.mtime(pdf) < ACTIVE_DAYS * 86_400 &&
+      File.read(tex).include?('\documentclass')
+  end
+end
+
+BUILDER = 'l' # leeni, ~/bin/l
+
+def builder?
+  ENV.fetch('PATH', '').split(':').any? { |d| File.executable?(File.join(d, BUILDER)) }
+end
+
+def compile(doc)
+  print "  compiling #{doc} with #{BUILDER} ... "
+  out, ok = Open3.capture2e(BUILDER, doc, stdin_data: '').then { |o, st| [o, st.success?] }
+  puts ok ? 'ok' : 'FAILED'
+  puts(out.lines.last(15).map { |l| "    #{l}" }) unless ok
+  ok
+end
+
+def compile_ok?
+  docs = active_docs
+  return true if docs.empty?
+
+  unless builder?
+    warn '  l (leeni) not on PATH; compile check skipped'
+    return true
+  end
+
+  puts 'Checking that the merged paper compiles:'
+  return true if docs.map { |d| compile(d) }.all?
+
+  $stdin.tty? && ask('Push anyway? [y/N]', %w[y n], 'n') == 'y'
+end
+
+def push?
+  out, ok = git('push', '-q')
+  return true if ok
+  return false if out.match?(/rejected|fetch first|non-fast-forward/)
+
+  abort "Push failed:\n#{out}"
+end
+
+# :help, :info, or the compile mode (true, false, nil = only after a real merge).
+def parse_args(argv)
+  return :help if argv.intersect?(HELP_FLAGS)
+  return :info if argv.intersect?(%w[-info --info])
+
+  unknown = argv - %w[--compile --no-compile]
+  abort "Unknown option: #{unknown.join(' ')}\n#{USAGE}" if unknown.any?
+  return true if argv.include?('--compile')
+
+  argv.include?('--no-compile') ? false : nil
+end
+
+def sync(compile_mode)
+  merged = merging?
+  finish_merge if merged
+  commit_local
+  MAX_TRIES.times do
+    merged = merge_remote? || merged
+    return puts('Up to date.') if git!('rev-list', '--count', '@{u}..HEAD').to_i.zero?
+
+    need = compile_mode.nil? ? merged : compile_mode
+    abort 'Not pushed: fix the compile error, then rerun git_latex_sync.' if need && !compile_ok?
+    return puts("Pushed to #{remote_label}.") if push?
+
+    puts "#{remote_label} changed in the meantime; merging again."
+  end
+  abort "Push still rejected after #{MAX_TRIES} tries."
+end
+
+mode = parse_args(ARGV)
+if mode == :help
+  puts HELP
+  exit
+end
+Dir.chdir(git!('rev-parse', '--show-toplevel').chomp)
+if mode == :info
+  show_info
+  exit
+end
+check_state
+sync(mode)

@@ -1,0 +1,204 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# git_latex_setup: one-time, idempotent git setup for a LaTeX paper repo.
+# Run with -h for the full description and workflow.
+
+require 'open3'
+
+HELP_FLAGS = %w[-h -H --help -help --H --h].freeze
+USAGE = 'usage: git_latex_setup | -h'
+HELP = <<~TXT.freeze
+  #{USAGE}
+
+  Prepares a LaTeX paper directory for syncing with a git remote (usually
+  Overleaf's git bridge; GitHub or GitLab work the same). Run it once per clone,
+  in the paper's directory. Running it again is harmless: it only fixes what is
+  missing and reports everything else as ok.
+
+  WHAT IT DOES
+    1. Repository. If the directory is not inside a git repo, runs git init
+       there. It refuses when the directory has no .tex file, so a stray run in
+       the wrong place creates nothing.
+    2. Git settings for this repo only (git config --local):
+         pull.rebase=true       git pull replays your commits on top of theirs
+         rebase.autoStash=true  git pull works with uncommitted edits
+         rerere.enabled=true    git remembers how you resolved a conflict
+         alias.sync             git sync = add -A, commit, pull --rebase, push
+                                (a quick alternative to git_latex_sync)
+    3. .gitignore. Adds whatever is missing of the standard patterns: LaTeX
+       build files (*.aux *.log *.out *.toc *.synctex.gz *.pdf ...), generated
+       bibliography (*.bbl *.blg *.bcf ...; Overleaf rebuilds *.bbl from the
+       .bib), editor/scratch files (auto/ .auctex-auto/ _region_.tex *.bak ...)
+       and junk directories (**/junk/ **/old/ snapshot/ ...). PDFs under any
+       figs/ directory stay addable (!**/figs/**/*.pdf, kept after *.pdf, since
+       git uses the last matching pattern). Exact duplicate patterns are removed
+       (the last copy is kept, which never changes what is ignored) and runs of
+       blank lines are collapsed. Your own entries and comments are kept.
+    4. Untracks files that are now ignored but were committed (*.bbl, *.bak),
+       with git rm --cached: the files stay on disk, and the next push removes
+       them from the remote (e.g. from the Overleaf project).
+    5. Remote check. Warns if the repo has no remote, or the branch tracks no
+       upstream, and says how to connect it.
+
+  It never commits, pushes, or deletes files from disk.
+
+  WORKFLOW
+    once per clone:   git_latex_setup
+    connect if asked: git remote add origin <url>, then git branch -u origin/master
+                      (existing remote project) or git push -u origin HEAD (new one)
+    then, always:     git_latex_sync          (see git_latex_sync -h)
+    to look first:    git_latex_sync -info
+TXT
+
+def parse_args(argv)
+  return if argv.empty?
+
+  abort "Unknown option: #{argv.join(' ')}\n#{USAGE}" unless argv.intersect?(HELP_FLAGS)
+
+  puts HELP
+  exit
+end
+
+CONFIG = {
+  'pull.rebase' => 'true',
+  'rebase.autoStash' => 'true',
+  'rerere.enabled' => 'true',
+  'alias.sync' => '!git add -A && (git commit -qm "Auto-commit: $(date \'+%F %T\')" || true) ' \
+                  '&& git pull --rebase && git push'
+}.freeze
+
+# Grouped as [comment, patterns]; only missing patterns are appended.
+IGNORE_GROUPS = [
+  ['Core auxiliary files', %w[*.aux *.log *.out *.toc *.thm *.vtc *.synctex.gz *.pdf !**/figs/**/*.pdf]],
+  ['Bibliography (Overleaf rebuilds *.bbl from the .bib)',
+   %w[*.bbl *.rel *.blg *-blx.bib *.run.xml *.bcf refs/backup/]],
+  ['Editor-specific (Emacs/AUCTeX) and scratch', %w[.auctex-auto/ auto/ prv/ tmp_overleaf/ _region_.tex x err *.bak]],
+  ['Junk directories',
+   %w[**/junk/ **/old/ .git_useless/ tempg/ u/ snapshot/ does_not_work/]]
+].map { |comment, pats| [comment.freeze, pats.map(&:freeze).freeze].freeze }.freeze
+
+# Negation => the pattern it overrides; the negation must come after it (last match wins).
+# PDFs in any figs/ directory are figures the paper needs, so they stay addable.
+REINCLUDE = { '!**/figs/**/*.pdf' => '*.pdf' }.freeze
+
+# Tracked files matching these get `git rm --cached`.
+UNTRACK_PATTERNS = ['*.bbl', '*.bak'].freeze
+
+def git!(*args)
+  out, status = Open3.capture2('git', *args)
+  abort "git #{args.join(' ')} failed" unless status.success?
+  out
+end
+
+def apply_config
+  CONFIG.each do |key, value|
+    current, = Open3.capture2('git', 'config', '--local', '--get', key)
+    next puts("  ok      #{key}") if current.chomp == value
+
+    git!('config', '--local', key, value)
+    puts "  set     #{key}"
+  end
+end
+
+def missing_groups(lines)
+  present = lines.map(&:strip)
+  IGNORE_GROUPS.filter_map do |comment, pats|
+    missing = pats.reject { |pat| present.include?(pat) }
+    [comment, missing] unless missing.empty?
+  end
+end
+
+# Keeps the last occurrence of each pattern (always safe: git uses the last matching
+# pattern, so an earlier identical copy never decides anything), all comments, and
+# single blank lines.
+def dedup(lines)
+  seen = {}
+  kept = lines.reverse.reject do |line|
+    key = line.strip
+    next false if key.empty? || key.start_with?('#')
+
+    seen.key?(key).tap { seen[key] = true }
+  end
+  kept.reverse.chunk_while { |a, b| a.strip.empty? && b.strip.empty? }.map(&:first)
+end
+
+def last_index(lines, pat)
+  lines.rindex { |l| l.strip == pat } || -1
+end
+
+# Re-appends any negation that sits before the pattern it overrides; dedup then
+# drops the earlier copy.
+def fix_order!(lines)
+  REINCLUDE.filter_map do |neg, base|
+    next if last_index(lines, neg) > last_index(lines, base)
+
+    lines.push(neg)
+    neg
+  end
+end
+
+def update_gitignore
+  old = File.exist?('.gitignore') ? File.read('.gitignore').lines.map(&:chomp) : []
+  added = missing_groups(old)
+  new = old.dup
+  added.each { |comment, pats| new.push('', "# #{comment}", *pats) }
+  moved = fix_order!(new)
+  new = dedup(new)
+  new.pop while new.last&.strip&.empty?
+  return puts('  ok      .gitignore') if new == old
+
+  File.write('.gitignore', "#{new.join("\n")}\n")
+  added.each { |pair| puts "  added   #{pair.last.join(' ')}" }
+  moved.each { |neg| puts "  moved   #{neg} after the pattern it overrides" }
+  removed = old.size + moved.size + added.sum { |_, pats| pats.size + 2 } - new.size
+  puts "  removed #{removed} duplicate/blank line(s) from .gitignore" if removed.positive?
+end
+
+def untrack_ignored
+  tracked = git!('ls-files', '-z', '--', *UNTRACK_PATTERNS).split("\0")
+  return puts('  ok      no generated files tracked') if tracked.empty?
+
+  git!('rm', '--cached', '-q', '--', *tracked)
+  tracked.each { |path| puts "  untrack #{path} (file kept on disk)" }
+  puts '  -> commit and push to remove them from the Overleaf project.'
+end
+
+def enter_repo
+  top, ok = Open3.capture2('git', 'rev-parse', '--show-toplevel', err: File::NULL)
+  return Dir.chdir(top.chomp) if ok.success?
+
+  abort "Not in a git repo, and no .tex file here: refusing to git init #{Dir.pwd}" if Dir.glob('*.tex').empty?
+
+  git!('init', '-q')
+  puts "  init    new git repo in #{Dir.pwd}"
+end
+
+REMOTE_HELP = <<~TXT
+  To connect it to Overleaf: the project's Git option (in the Overleaf Menu)
+  shows the URL; then
+      git remote add origin <url>
+      git fetch origin && git branch -u origin/master   (existing Overleaf project)
+      git push -u origin HEAD                           (new project from this repo)
+TXT
+
+def check_remote
+  if git!('remote').strip.empty?
+    warn "  warning: this repo has no remote, so there is nothing to sync with.\n#{REMOTE_HELP.gsub(/^/, '    ')}"
+    return
+  end
+  _, ok = Open3.capture2('git', 'rev-parse', '--abbrev-ref', '@{u}', err: File::NULL)
+  return puts('  ok      remote and upstream') if ok.success?
+
+  warn '  warning: the current branch tracks no upstream; set it with ' \
+       '`git branch -u origin/master` or `git push -u origin HEAD`.'
+end
+
+parse_args(ARGV)
+enter_repo
+puts "git LaTeX setup in #{Dir.pwd}"
+warn '  warning: no .tex file at the repo root' if Dir.glob('*.tex').empty?
+apply_config
+update_gitignore
+untrack_ignored
+check_remote

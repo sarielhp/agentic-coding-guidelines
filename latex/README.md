@@ -27,6 +27,11 @@ The standard tools are located in [tools/](tools/) and symlinked to `~/bin/`:
 - [tools/latex_indent](tools/latex_indent): Formatter and indenter using `tex-fmt`. The 4-space, 72-column configuration is embedded directly into the script; copying `tex-fmt.toml` into project repositories is explicitly forbidden to prevent configuration drift.
 - [tools/latex_check_conventions](tools/latex_check_conventions): Read-only static convention auditor. Verifies typed labels, BibLaTeX/Biber, label line layout, and figure structure.
 - [tools/tex_source.rb](tools/tex_source.rb): Shared LaTeX parser that strips comments and protects verbatim/listing environments.
+- [tools/git_latex_setup](tools/git_latex_setup): One-time, idempotent git setup for a paper repository (`git init` if needed, local git settings, the `git sync` alias, standard `.gitignore` patterns with PDFs under `figs/` kept addable, untracking of committed `*.bbl`/`*.bak`, and a remote/upstream check). Never commits or pushes. `-h` describes it in detail.
+- [tools/git_latex_sync](tools/git_latex_sync): Day-to-day sync with the paper's remote (Overleaf, GitHub, GitLab): commit everything, show and merge coauthors' changes, guide conflict resolution file by file, compile-check with leeni (`l`) after a real merge, push. `-info` shows the remote and whether it is ahead without changing anything; `-h` describes it in detail.
+
+### Collaborating through git (Overleaf, GitHub)
+Run `git_latex_setup` once per clone, then `git_latex_sync` whenever you start, every 30–60 minutes, and when you stop; `git_latex_sync -info` shows what is waiting first. Keep one sentence (or clause) per line and do not re-wrap paragraphs, since git merges line by line, and tell coauthors which section you are editing. Do not commit generated files (`*.bbl`, build PDFs); Overleaf rebuilds the bibliography from the `.bib`. Tests: `test/latex_git_test.rb`.
 
 Like every program here, the tools keep temporary files (such as `latex_indent`'s cached `tex-fmt` configuration) under `<tmpdir>/<user>/standards/`; see the standards README, "Temporary and cached files".
 
