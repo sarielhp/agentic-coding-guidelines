@@ -17,14 +17,15 @@ module LatexIndent
     tabchar = "space"
     no-indent-envs = ["document"]
 
-    # Wrap long lines at 72 columns. tex-fmt only splits overlong lines; it
-    # never joins lines, so the paper's hand-chosen paragraph and display
-    # breaks are preserved, including separate label and math delimiter
-    # lines. Run latex_fix_layout first; tex-fmt indents those lines after
-    # they are present in the source.
+    # Wrap lines longer than 78 columns, refilling them to at most 74
+    # columns (tuned to match hand-filled sources). tex-fmt only splits
+    # overlong lines; it never joins lines, so the paper's hand-chosen
+    # paragraph and display breaks are preserved, including separate label
+    # and math delimiter lines. Run latex_fix_layout first; tex-fmt indents
+    # those lines after they are present in the source.
     wrap = true
-    wraplen = 72
-    wrapmin = 72
+    wraplen = 78
+    wrapmin = 74
   TOML
 
   module_function
@@ -80,7 +81,7 @@ module LatexIndent
         Formats and reindents LaTeX manuscript files using tex-fmt with the
         author-approved standard configuration. Indents environments with 4 spaces,
         leaves top-level document commands flush left, wraps lines longer than
-        72 columns, and preserves manual paragraph and display breaks.
+        78 columns (to 74), and preserves manual paragraph and display breaks.
 
         To avoid configuration drift, the tex-fmt configuration is embedded directly
         within this script. Copying tex-fmt.toml into project repositories is explicitly
