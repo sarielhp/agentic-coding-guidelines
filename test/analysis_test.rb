@@ -85,7 +85,9 @@ class RubyAnalyzerTest < ToolingFixture
     assert status.success?
     _, _, status = analyze('--rubocop', 'bin/fixture')
     assert status.success?
-    assert_equal File.join(@repo, '.rubocop.yml'), trace.last[2]
+    args = trace.last
+    assert_equal File.join(@repo, '.rubocop.yml'), args[args.index('--config') + 1]
+    assert_includes args, '--force-exclusion', 'named files must still honour the Exclude list'
     write('bin/broken', "#!/usr/bin/env ruby\ndef broken(\n")
     _, err, status = analyze('--syntax', 'bin/broken')
     refute status.success?
