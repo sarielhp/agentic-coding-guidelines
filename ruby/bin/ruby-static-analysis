@@ -53,7 +53,9 @@ begin
       temporary_config.flush
       config = ['--config', temporary_config.path]
     end
-    AnalysisSupport.run('rubocop', *config, *files)
+    # Files named on the command line bypass the configuration's Exclude list
+    # unless forced, so a project's generated bundle would be reviewed.
+    AnalysisSupport.run('rubocop', '--force-exclusion', *config, *files)
   end
   if selected.include?(:vuln)
     abort 'dependency audit requires Gemfile.lock' unless File.file?('Gemfile.lock')

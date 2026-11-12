@@ -51,11 +51,17 @@ module AnalysisSupport
     paths.flat_map { |path| File.directory?(path) ? Dir.glob(File.join(path, '**', '*')) : Dir.glob(path) }
          .uniq.sort.select do |path|
       next false unless File.file?(path)
-      next false if path.split('/').intersect?(%w[.git vendor junk target .bundle node_modules])
+      next false if path.split('/').intersect?(%w[.git vendor junk target build .bundle node_modules])
       next true if %w[.rb .gemspec].include?(File.extname(path)) || File.basename(path) == 'Rakefile'
 
-      File.open(path, &:gets).to_s.match?(/\A#!.*ruby/)
+      ruby_shebang?(path)
     end
+  end
+
+  # Binary mode: a PDF or image in the tree is not UTF-8, and its first
+  # "line" may be the whole file.
+  def ruby_shebang?(path)
+    File.open(path, 'rb') { |file| file.gets("\n", 256) }.to_s.match?(/\A#!.*ruby/)
   end
 
   def syntax(files)
