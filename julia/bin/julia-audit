@@ -112,10 +112,10 @@ module JuliaCodeAuditor
     :soft if info.lines > options[:soft_file_lines]
   end
 
+  # Only an explicit marker comment exempts a file (static data); a name is no
+  # evidence that a file holds no logic.
   def self.exempt_file?(path)
-    return true if File.basename(path).match?(/(?:catalog|data|dict|fixtures|diagnostics)/i)
-
-    File.read(path).include?('julia-audit: allow-long-file')
+    File.read(path).match?(/^\s*#\s*julia-audit: allow-long-file\b/)
   end
 
   # --- File discovery ---------------------------------------------------------

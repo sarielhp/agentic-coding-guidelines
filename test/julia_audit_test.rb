@@ -180,6 +180,10 @@ class JuliaAuditTest < Minitest::Test
     source('big.jl', "# julia-audit: allow-long-file\n#{body}\n")
     _, err, status = audit('--soft-file-lines', '10', '--max-file-lines', '20')
     assert status.success?, err
+    source('diagnostics.jl', "#{body}\n")
+    out, _, status = audit('--soft-file-lines', '10', '--max-file-lines', '20')
+    refute status.success?, 'a file name must not exempt a file'
+    assert_match(/exceeds hard limit of 20/, plain(out))
   end
 
   def test_tests_are_excluded_unless_requested

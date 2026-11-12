@@ -131,7 +131,7 @@ When refactoring methods that exceed complexity or line limits, AI coding agents
 - **Comfort Range**: 300–700 lines. Keeping methods under cognitive limits keeps files naturally modular.
 - **Warning Threshold**: 800 lines (soft warning).
 - **Hard Ceiling**: 1100 lines.
-- **Exemptions**: Static lookup tables, serialized error catalogs, and data dictionary files are exempt from the hard file limit provided they contain minimal operational logic.
+- **Exemptions**: Static lookup tables, serialized error catalogs, and data dictionary files are exempt from the hard file limit provided they contain minimal operational logic. The exemption is explicit: a `# ruby-audit: allow-long-file` comment line in the file. A file name never exempts a file, and a file mixing data with logic splits the logic out instead of carrying the marker.
 
 ---
 

@@ -57,8 +57,12 @@ module RubyCodeAuditor
       return unless n.is_a?(RubyVM::AbstractSyntaxTree::Node)
 
       is_resource = resource_block_node?(n)
-      branch_type = [:IF, :WHILE, :UNTIL, :CASE].include?(n.type) || (n.type == :ITER && !is_resource)
-      cur_depth = is_flat_continuation ? depth : (depth + (branch_type ? 1 : 0))
+      branch_type = %i[IF WHILE UNTIL CASE].include?(n.type) || (n.type == :ITER && !is_resource)
+      cur_depth = if is_flat_continuation
+                    depth
+                  else
+                    (depth + (branch_type ? 1 : 0))
+                  end
       max_depth = [max_depth, cur_depth].max
 
       case n.type
@@ -146,32 +150,42 @@ module RubyCodeAuditor
       # 2. Check for bare 'rescue Exception'
       if clean_line =~ /\brescue\s+(?:::)?Exception\b/ && !line.include?('ruby-audit: allow-rescue-exception')
         # ruby-audit: allow-rescue-exception
-        trap_violations << TrapViolation.new(file, idx + 1, 'rescue_exception', "unsafe 'rescue Exception' traps system interrupts and signals; rescue StandardError instead") # ruby-audit: allow-rescue-exception
+        risk = "unsafe 'rescue Exception' traps system interrupts and signals" # ruby-audit: allow-rescue-exception
+        trap_violations << TrapViolation.new(file, idx + 1, 'rescue_exception', "#{risk}; rescue StandardError instead")
       end
 
       # 3. Check for Hash.new([]) or Hash.new({}) mutable default trap
       if clean_line =~ MUTABLE_HASH_PATTERN
-        trap_violations << TrapViolation.new(file, idx + 1, 'hash_default_mutable', "Hash.new with mutable literal shares a single instance; use block form: Hash.new { |h, k| h[k] = [] }")
+        trap_violations << TrapViolation.new(file, idx + 1, 'hash_default_mutable',
+                                             'Hash.new with mutable literal shares a single instance; ' \
+                                             'use block form: Hash.new { |h, k| h[k] = [] }')
       end
 
       # 4. Check for global core class reopening / monkey patching
-      if clean_line =~ /^class\s+(String|Array|Hash|Integer|Float|Symbol|Numeric)\b/
-        trap_violations << TrapViolation.new(file, idx + 1, 'core_monkey_patch', "global reopening of core class '#{Regexp.last_match(1)}' is prohibited; use Refinements or utility modules")
-      end
+      next unless clean_line =~ /^class\s+(String|Array|Hash|Integer|Float|Symbol|Numeric)\b/
+
+      trap_violations << TrapViolation.new(file, idx + 1, 'core_monkey_patch',
+                                           "global reopening of core class '#{Regexp.last_match(1)}' is prohibited; " \
+                                           'use Refinements or utility modules')
     end
   end
 
   def self.audit_file(file, options, violations, all_methods, file_violations, style_violations, trap_violations)
     return unless File.file?(file)
 
-    content = File.read(file) rescue nil
+    content = begin
+      File.read(file)
+    rescue StandardError
+      nil
+    end
     return unless content
 
     file_lines = content.lines
     line_count = file_lines.size
 
-    # Check File Sizing
-    exempt = content.include?('ruby-audit: allow-long-file') || file =~ /(?:catalog|data|dict|fixtures|diagnostics)/i
+    # Check File Sizing. Only an explicit marker comment exempts a file (static
+    # data); a name is no evidence that a file holds no logic.
+    exempt = content.match?(/^\s*#\s*ruby-audit: allow-long-file\b/)
     unless exempt
       if line_count > options[:max_file_lines]
         file_violations << FileViolation.new(file, line_count, options[:max_file_lines], :hard)
@@ -184,15 +198,17 @@ module RubyCodeAuditor
     check_style_and_traps(file_lines, file, content, style_violations, trap_violations)
 
     # Check AST Method Metrics
-    ast = RubyVM::AbstractSyntaxTree.parse(content) rescue nil
+    ast = begin
+      RubyVM::AbstractSyntaxTree.parse(content)
+    rescue StandardError
+      nil
+    end
     return unless ast
 
     walker = lambda do |node|
       return unless node.is_a?(RubyVM::AbstractSyntaxTree::Node)
 
-      if node.type == :DEFN || node.type == :DEFS
-        check_method_node(file, node, options, violations, all_methods)
-      end
+      check_method_node(file, node, options, violations, all_methods) if %i[DEFN DEFS].include?(node.type)
       node.children.each { |child| walker.call(child) if child.is_a?(RubyVM::AbstractSyntaxTree::Node) }
     end
 
@@ -200,7 +216,11 @@ module RubyCodeAuditor
   end
 
   def self.ruby_executable?(path)
-    first_line = File.open(path, &:gets) rescue nil
+    first_line = begin
+      File.open(path, &:gets)
+    rescue StandardError
+      nil
+    end
     first_line&.start_with?('#!/usr/bin/env ruby') || first_line&.start_with?('#!/usr/bin/ruby')
   end
 
@@ -210,7 +230,7 @@ module RubyCodeAuditor
       path.include?('/test/') || path.include?('/spec/')
   end
 
-  def self.collect_target_files(paths, include_tests = false)
+  def self.collect_target_files(paths, include_tests: false)
     targets = if paths.empty?
                 default_project_files
               else
@@ -297,7 +317,8 @@ module RubyCodeAuditor
     if options[:verbose]
       puts "Audited #{all_methods.length} methods across files."
       all_methods.sort_by { |m| -m[:cc] }.first(20).each do |m|
-        puts "  %-25s %-30s (L%4d): lines=%3d, depth=%d, cc=%2d" % [m[:file], m[:name], m[:line], m[:lines], m[:depth], m[:cc]]
+        puts format('  %<file>-25s %<name>-30s (L%<line>4d): lines=%<lines>3d, depth=%<depth>d, cc=%<cc>2d',
+                    **m.slice(:file, :name, :line, :lines, :depth, :cc))
       end
       puts ''
     end
@@ -330,7 +351,8 @@ module RubyCodeAuditor
           puts "  \e[31m#{f.file}\e[0m: File length #{f.lines} exceeds hard limit of #{f.limit} lines"
         end
         violations.each do |v|
-          puts "  \e[31m#{v.file}:#{v.line}\e[0m - \e[1m#{v.name}\e[0m: #{v.reasons.join(', ')} [lines=#{v.lines}, depth=#{v.depth}, cc=#{v.complexity}]"
+          metrics = "[lines=#{v.lines}, depth=#{v.depth}, cc=#{v.complexity}]"
+          puts "  \e[31m#{v.file}:#{v.line}\e[0m - \e[1m#{v.name}\e[0m: #{v.reasons.join(', ')} #{metrics}"
         end
       end
       return 1
@@ -347,7 +369,7 @@ module RubyCodeAuditor
 
   def self.run(args = ARGV)
     options, paths = parse_cli_options(args)
-    files = collect_target_files(paths, options[:include_tests])
+    files = collect_target_files(paths, include_tests: options[:include_tests])
 
     violations = []
     all_methods = []
