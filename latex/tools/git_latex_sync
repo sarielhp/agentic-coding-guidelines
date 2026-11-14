@@ -4,13 +4,15 @@
 # git_latex_sync: commit, merge the remote's changes, compile-check, push.
 # Run with -h for the full description and workflow.
 
+require 'find'
 require 'open3'
+require 'rbconfig'
 require 'shellwords'
 
 $stdout.sync = true
 
 HELP_FLAGS = %w[-h -H --help -help --H --h].freeze
-USAGE = 'usage: git_latex_sync [--compile | --no-compile] | -info | -h'
+USAGE = 'usage: git_latex_sync [--all DIR...] [--compile | --no-compile | -info] | -h'
 # Only main documents whose PDF was built within this many days are compiled.
 ACTIVE_DAYS = 14
 MAX_TRIES = 3
@@ -52,12 +54,23 @@ HELP = <<~TXT.freeze
     -info          change nothing: show the remote (host and URL), the branch,
                    whether the remote has commits you do not (and which), how
                    many local commits are unpushed, and uncommitted changes
+    --all DIR...   run on every git repository under the DIRs (each directory
+                   holding its own .git, nested ones included), one after the
+                   other, then list what happened in each. Combines with the
+                   options above (--all ~/papers -info looks at all of them).
+                   Nothing asks a question: a merge with conflicts is undone
+                   (your work stays committed, nothing is pushed), new files
+                   that do not look like paper sources stay uncommitted, and
+                   a paper that stopped compiling is not pushed. Rerun
+                   git_latex_sync inside a repository listed as FAILED to
+                   settle it by hand.
     -h, --help     this message (also -H, -help, --h, --H)
 
   WORKFLOW
     once per clone:   git_latex_setup   (git config, .gitignore, remote check)
     then, always:     git_latex_sync
     to look first:    git_latex_sync -info
+    every paper:      git_latex_sync --all ~/papers
     Tell coauthors which section you are working on, keep one sentence (or
     clause) per line, and do not re-wrap paragraphs: git merges line by line.
 
@@ -169,7 +182,17 @@ end
 
 def conflicted = git!('diff', '--name-only', '--diff-filter=U', '-z').split("\0")
 
+# Set in the child runs of --all: no questions, a conflicted merge is undone.
+BATCH_ENV = 'GIT_LATEX_SYNC_BATCH'
+
+def batch? = ENV[BATCH_ENV] == '1'
+
 def resolve_conflicts
+  if batch?
+    files = conflicted
+    git!('merge', '--abort')
+    abort "Conflicts in: #{files.join(' ')}\nMerge undone, nothing pushed. Run git_latex_sync here to resolve them."
+  end
   abort("Conflicts in: #{conflicted.join(' ')}\nRun git_latex_sync in a terminal to resolve them.") unless $stdin.tty?
   until (files = conflicted).empty?
     puts "\n#{files.size} file(s) with conflicts: #{files.join(' ')}"
@@ -329,9 +352,72 @@ def push?
   abort "Push failed:\n#{out}"
 end
 
-# :help, :info, or the compile mode (true, false, nil = only after a real merge).
+# ---- --all: every repository under some directories ---------------------------------
+
+# The work trees under DIRS: each directory holding a .git (a directory, or a file for a worktree).
+def repositories(dirs)
+  dirs.flat_map do |dir|
+    abort "Not a directory: #{dir}" unless File.directory?(dir)
+    found = []
+    Find.find(File.expand_path(dir)) do |path|
+      next unless File.basename(path) == '.git'
+
+      found << File.dirname(path)
+      Find.prune
+    end
+    found
+  end.uniq.sort
+end
+
+# Runs this script in REPO with FLAGS, without a terminal; prints its output indented.
+# Returns [succeeded, its last output line].
+def sync_one(repo, flags)
+  last = ''
+  options = { chdir: repo, in: File::NULL }
+  status = Open3.popen2e({ BATCH_ENV => '1' }, RbConfig.ruby, File.expand_path(__FILE__), *flags, **options) do |_, out, wait|
+    out.each_line do |line|
+      puts "  #{line}"
+      last = line.strip unless line.strip.empty?
+    end
+    wait.value
+  end
+  [status.success?, last]
+end
+
+def sync_all(dirs, flags)
+  repos = repositories(dirs)
+  abort "No git repositories under #{dirs.join(' ')}" if repos.empty?
+  failed = repos.each_with_index.filter_map do |repo, index|
+    puts "\n[#{index + 1}/#{repos.size}] #{repo}"
+    ok, last = sync_one(repo, flags)
+    [repo, last] unless ok
+  end
+  puts "\n#{repos.size - failed.size} of #{repos.size} repositories done."
+  return if failed.empty?
+
+  puts("FAILED (#{failed.size}):", failed.map { |repo, why| "  #{repo}: #{why}" })
+  exit 1
+end
+
+# [:all, DIRS, the flags for each repository's run], when --all is given; nil otherwise.
+def all_args(argv)
+  at = argv.index('--all')
+  return nil unless at
+
+  dirs = argv[(at + 1)..].take_while { |arg| !arg.start_with?('-') }
+  abort "--all needs at least one directory\n#{USAGE}" if dirs.empty?
+  flags = argv[0...at] + argv[(at + 1 + dirs.size)..]
+  unknown = flags - %w[--compile --no-compile -info --info]
+  abort "Unknown option: #{unknown.join(' ')}\n#{USAGE}" if unknown.any?
+  [:all, dirs, flags]
+end
+
+# :help, :info, [:all, DIRS, FLAGS], or the compile mode (true, false, nil = only after a real merge).
 def parse_args(argv)
   return :help if argv.intersect?(HELP_FLAGS)
+
+  all = all_args(argv)
+  return all if all
   return :info if argv.intersect?(%w[-info --info])
 
   unknown = argv - %w[--compile --no-compile]
@@ -361,6 +447,10 @@ end
 mode = parse_args(ARGV)
 if mode == :help
   puts HELP
+  exit
+end
+if mode.is_a?(Array)
+  sync_all(mode[1], mode[2])
   exit
 end
 Dir.chdir(git!('rev-parse', '--show-toplevel').chomp)

@@ -177,4 +177,25 @@ class LatexGitToolsTest < Minitest::Test
       assert_equal 'init', git(me, 'log', '-1', '--format=%s').chomp, '-info must not merge'
     end
   end
+
+  # --all syncs every repository below a directory, undoes a conflicted merge, and lists the failures.
+  def test_sync_all_runs_every_repository
+    with_remote do |me, coauthor|
+      root = File.dirname(me)
+      edit_and_push(coauthor, 'two', 'THEIR two')
+      File.write(File.join(me, 'paper.tex'), File.read(File.join(me, 'paper.tex')).sub('two', 'MY two'))
+      lone = File.join(root, 'papers', 'lone')
+      FileUtils.mkdir_p(lone)
+      git(lone, 'init', '-q')
+      out, _err, status = run_tool('git_latex_sync', '--all', root, '--no-compile', dir: root)
+      refute status.success?
+      assert_match(%r{\[1/3\] .*coauthor}, out)
+      assert_match(/1 of 3 repositories done/, out)
+      assert_match(/FAILED \(2\):\n.*me: Merge undone.*\n.*lone: No upstream/, out)
+      assert_empty git(me, 'diff', '--name-only', '--diff-filter=U'), 'the conflicted merge is undone'
+      out, = run_tool('git_latex_sync', '-info', dir: me)
+      refute_match(/MERGE IN PROGRESS/, out)
+      assert_match(/MY two/, File.read(File.join(me, 'paper.tex')))
+    end
+  end
 end
