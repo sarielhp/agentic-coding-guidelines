@@ -42,6 +42,17 @@ julia-install-tools                # install into the tools environment (require
 3. Run `julia-audit --strict` and `julia-static-analysis`; fix findings or record justified `allow` markers.
 4. Put `Aqua.test_all` in the test suite.
 
+## Review cycle sandbox
+
+[bws/julia.json](bws/julia.json) is the bws profile for running Julia in the `review-cycle`
+sandbox. `review-cycle --setup` copies it into a Julia project's `.bws/profiles/` (keeping an
+existing copy) and enables it; review it and run `bws config trust` once, since setup never
+grants trust. The profile mounts `~/.juliaup` and `~/.julia` read-only and sets
+`JULIA_DEPOT_PATH` to a sandbox-local depot followed by `~/.julia`, so the sandbox reuses the
+host's installed and precompiled packages (offline) and writes only its own precompile cache.
+`~/.julia` must be listed explicitly: a trailing empty entry alone expands to the bundled
+depots without the user depot.
+
 ## Lifecycle templates
 
 `templates/` holds the same lifecycle helpers as the Ruby and Rust standards, on the same
