@@ -140,7 +140,10 @@ When refactoring functions that exceed complexity or line limits:
 | Scope | Required validation |
 |---|---|
 | One standalone script, at most 150 lines, no `Project.toml` | `julia-audit --strict` and `julia-static-analysis <file>` (syntax, formatting). |
-| A package or project | Fast gate: strict `julia-audit`, `julia-static-analysis` (syntax, formatting, JET, ExplicitImports), and the test suite, which includes Aqua. |
+| A package or project | Fast gate (`tools/gate`): strict `julia-audit`, `julia-static-analysis --syntax --format`, and the test suite, which includes Aqua. |
+| Before a release | Full gate (`tools/gate --full`, run by `tools/release`): the fast gate plus JET and ExplicitImports, which are slow and need the tools environment. |
+
+Performance-critical packages should add a JET `report_opt` check of their hot entry points to the full gate, called with concrete arguments, in its own environment so the test suite does not depend on JET. `--jet` runs `report_package`, which finds errors but not runtime dispatch: abstract field or container types and type-unstable locals pass it silently.
 
 `julia-audit` measures every function with the parser built into Julia (`Base.JuliaSyntax`, Julia 1.10 or later): nesting depth ≤ 4, cognitive complexity ≤ 15, method length tiers, file size, argument count, and the idiom and trap rules of section 4 that are decidable from syntax:
 
