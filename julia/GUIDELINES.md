@@ -46,7 +46,7 @@ Length counts **code lines of the body**: blank lines, comment-only lines, the s
 ## 4. Idiomatic Julia Style & Quality Rules
 
 ### Formatting
-- Use **JuliaFormatter.jl with its default style** (`.JuliaFormatter.toml` containing `style = "default"`, template in [templates/dot_JuliaFormatter.toml](templates/dot_JuliaFormatter.toml)). Do not hand-format and do not customize the style.
+- Use **JuliaFormatter.jl with its default style** plus `always_for_in = true` (`.JuliaFormatter.toml` containing `style = "default"` and `always_for_in = true`, template in [templates/dot_JuliaFormatter.toml](templates/dot_JuliaFormatter.toml)). Loops use `for x in xs`, never `=` or `∈`: the default style would otherwise rewrite range loops to `=`, against the convention of Base and most packages. Do not hand-format and do not customize the style further.
 - Formatting changes go in **their own commit**, with no logic changes, so that review and `git blame` stay useful. Verify with the project's tests (and any numerical regression snapshot) before committing.
 
 ### Control Flow & "Line of Sight"
