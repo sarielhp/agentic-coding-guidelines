@@ -31,12 +31,12 @@ module ProjectTmp
       @project or raise 'ProjectTmp.project is not set'
     end
 
-    # <tmpdir>/<user>/<project>. The user directory must belong to the user and
-    # be closed to writes by others; the project directory is private.
+    # <tmpdir>/<user>/<project>. The user directory is shared by every tool and
+    # is not checked; the project directory, the one actually used, is private.
     def root
       base = File.join(Dir.tmpdir, user_name) # tmp-exempt: the helper itself
-      ensure_dir(base, forbidden: 0o022)
-      ensure_dir(File.join(base, project), forbidden: 0o077)
+      FileUtils.mkdir_p(base, mode: 0o700)
+      ensure_private_dir(File.join(base, project))
     end
 
     def user_name
@@ -47,7 +47,7 @@ module ProjectTmp
 
     # A long-lived private directory for one purpose, such as locks.
     def dir(purpose)
-      ensure_dir(File.join(root, purpose), forbidden: 0o077)
+      ensure_private_dir(File.join(root, purpose))
     end
 
     # Dir.mktmpdir under root/<purpose>/, named by creation time. With a block
@@ -135,19 +135,22 @@ module ProjectTmp
       end
     end
 
-    # Creates `path` (mode 0700) if needed and refuses one that is a symlink,
-    # owned by someone else, or open to the `forbidden` permission bits: the
-    # names are predictable, and lock files may be opened for writing inside.
-    def ensure_dir(path, forbidden:)
+    # Creates `path` (mode 0700) if needed. The names are predictable and lock
+    # files may be opened for writing inside, so a symlink or a directory owned
+    # by someone else is refused; one of ours that is open to others is made
+    # private (chmod 0700) rather than refused.
+    def ensure_private_dir(path)
       begin
         Dir.mkdir(path, 0o700)
       rescue Errno::EEXIST
         nil
       end
       stat = File.lstat(path)
-      return path if stat.directory? && !stat.symlink? && stat.uid == Process.uid && stat.mode.nobits?(forbidden)
-
-      abort "#{project}: refusing to use #{path}: not a directory owned by uid #{Process.uid} and closed to other users"
+      unless stat.directory? && !stat.symlink? && stat.uid == Process.uid
+        abort "#{project}: refusing to use #{path}: not a directory owned by uid #{Process.uid}"
+      end
+      File.chmod(0o700, path) unless stat.mode.nobits?(0o077)
+      path
     end
   end
 end

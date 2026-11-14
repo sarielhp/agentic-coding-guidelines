@@ -166,10 +166,11 @@ is `PROJECT_NAME` in `tools/settings.rb`, or the repository directory's name.
 - **One entry per user and project.** Nothing is created directly in the system
   temporary directory: a long, namespaced path keeps it from filling with one
   entry per run, and keeps parallel runs and projects apart.
-- **Private.** The user directory must belong to the user and be closed to
-  writes by others; the project directory and every purpose directory are
-  `0700`. The names are predictable, so a directory planted by someone else is
-  refused, never used.
+- **Private.** The user directory is shared by every tool and is not checked;
+  only the directories actually used are: the project directory and every
+  purpose directory must be real directories owned by the user, and are set to
+  `0700` (`chmod`) when they are open to others. The names are predictable, so a
+  symlink or a directory owned by someone else is refused, never used.
 - **Swept after 24 hours.** Making a temporary directory first removes entries
   of the tree older than 24 hours, so an interrupted run never leaves garbage
   for long. A lock file is kept while a process holds it. Old-style

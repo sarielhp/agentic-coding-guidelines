@@ -2,6 +2,7 @@
 
 require_relative 'tmp_env'
 require 'minitest/autorun'
+require 'fileutils'
 
 # The standards repository follows its own rule (README, "Temporary and cached files"):
 # its programs and templates create temporary files only through ProjectTmp,
@@ -51,5 +52,25 @@ class TmpPolicyTest < Minitest::Test
     ProjectTmp.sweep!
     refute File.exist?(old)
     assert File.exist?(made)
+  end
+
+  # Only the directory actually used is checked: a shared, group-writable
+  # <tmpdir>/<user> is accepted as is, and a project directory of ours that is
+  # open to others is made private instead of refused.
+  def test_only_the_project_directory_is_checked_and_tightened
+    tmp = File.join(ENV.fetch('TMPDIR'), 'perm-test')
+    user_dir = File.join(tmp, ProjectTmp.user_name)
+    FileUtils.mkdir_p(File.join(user_dir, 'perm-project'))
+    File.chmod(0o775, user_dir)
+    File.chmod(0o755, File.join(user_dir, 'perm-project'))
+    saved_tmpdir = ENV.fetch('TMPDIR')
+    ENV['TMPDIR'] = tmp
+    ProjectTmp.project = 'perm-project'
+    assert_equal File.join(user_dir, 'perm-project'), ProjectTmp.root
+    assert_equal 0o775, File.stat(user_dir).mode & 0o777
+    assert_equal 0o700, File.stat(File.join(user_dir, 'perm-project')).mode & 0o777
+  ensure
+    ENV['TMPDIR'] = saved_tmpdir
+    ProjectTmp.project = 'standards'
   end
 end
