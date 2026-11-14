@@ -263,6 +263,45 @@ class JuliaAuditTest < Minitest::Test
     assert_match(/many takes 6 arguments/, plain(out))
   end
 
+  # --- Baseline ----------------------------------------------------------------
+
+  SIX_ARGS = "many(a, b, c, d, e, f) = a + b + c + d + e + f\n"
+
+  def test_baseline_accepts_listed_violations_and_rejects_new_ones
+    source('a.jl', SIX_ARGS)
+    out, _, status = audit('--write-baseline')
+    assert status.success?, out
+    assert_includes File.read(File.join(@tmp, '.julia-audit-baseline')), "src/a.jl\tdef:many"
+    out, _, status = audit('--strict')
+    assert status.success?, plain(out)
+
+    source('b.jl', SIX_ARGS.sub('many', 'more'))
+    out, _, status = audit('--strict')
+    refute status.success?
+    assert_match(/more takes 6 arguments/, plain(out))
+    refute_match(/many takes/, plain(out))
+  end
+
+  def test_stale_baseline_entries_fail_strict
+    source('a.jl', SIX_ARGS)
+    audit('--write-baseline')
+    source('a.jl', "many(a) = a\n")
+    out, _, status = audit('--strict')
+    refute status.success?
+    assert_match(%r{Stale baseline entry .*src/a\.jl\tdef:many}, plain(out))
+    _, _, status = audit
+    assert status.success?
+  end
+
+  def test_explicit_baseline_file_is_used
+    source('a.jl', SIX_ARGS)
+    list = File.join(@tmp, 'known.txt')
+    audit('--baseline', list, '--write-baseline')
+    refute File.exist?(File.join(@tmp, '.julia-audit-baseline'))
+    _, _, status = audit('--strict', '--baseline', list)
+    assert status.success?
+  end
+
   # --- Failures ----------------------------------------------------------------
 
   def test_syntax_errors_fail_the_audit

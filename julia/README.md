@@ -6,7 +6,7 @@
 
 | Tool | Purpose |
 |---|---|
-| `bin/julia-audit` | AST auditor: nesting depth, cognitive complexity, method length tiers, file size, argument count, idiom and trap rules. Measures with `Base.JuliaSyntax` through `bin/julia-ast-metrics.jl`; needs Julia ≥ 1.10 and no packages. |
+| `bin/julia-audit` | AST auditor: nesting depth, cognitive complexity, method length tiers, file size, argument count, idiom and trap rules; known violations can be recorded in `.julia-audit-baseline` (`--write-baseline`). Measures with `Base.JuliaSyntax` through `bin/julia-ast-metrics.jl`; needs Julia ≥ 1.10 and no packages. |
 | `bin/julia-static-analysis` | `--syntax`, `--format` (JuliaFormatter), `--jet`, `--imports` (ExplicitImports), `--aqua`. |
 | `bin/julia-install-tools` | Audits or creates the dedicated tools environment holding JuliaFormatter, JET, ExplicitImports, and Aqua. `--check-only` changes nothing. |
 | `bin/julia-checks.jl` | Julia-side runner used by `julia-static-analysis`. |

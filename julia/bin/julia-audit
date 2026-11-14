@@ -36,13 +36,17 @@ module JuliaCodeAuditor
     include_tests: false,
     strict: false,
     quiet: false,
-    verbose: false
+    verbose: false,
+    baseline: nil,
+    write_baseline: false
   }.freeze
+
+  BASELINE_FILE = '.julia-audit-baseline'
 
   Definition = Struct.new(:file, :name, :line, :last_line, :lines, :depth, :cognitive, :cyclomatic, :args)
   Finding = Struct.new(:file, :line, :severity, :rule, :message)
   FileInfo = Struct.new(:file, :lines, :library)
-  Results = Struct.new(:files, :definitions, :findings, :errors)
+  Results = Struct.new(:files, :definitions, :findings, :errors, :stale)
 
   # --- Record parsing ---------------------------------------------------------
 
@@ -118,6 +122,59 @@ module JuliaCodeAuditor
     File.read(path).match?(/^\s*#\s*julia-audit: allow-long-file\b/)
   end
 
+  # --- Baseline ---------------------------------------------------------------
+  # A committed list of known violations, one "path<TAB>key" per line, so a
+  # project can adopt the gate with existing debt: listed violations pass, new
+  # ones fail, and entries that no longer match are reported (fatal under
+  # --strict) so the list only shrinks. Keys carry no line numbers:
+  # def:<function> (metrics and argument count), file-length, rule:<rule>.
+
+  def self.violation_keys(results, options, root)
+    keys = []
+    results.definitions.each do |d|
+      next if definition_reasons(d, options).empty? && d.args <= options[:max_args]
+
+      keys << [baseline_path(d.file, root), "def:#{d.name}"]
+    end
+    results.files.each { |info| keys << [baseline_path(info.file, root), 'file-length'] if file_status(info, options) }
+    results.findings.each { |f| keys << [baseline_path(f.file, root), "rule:#{f.rule}"] }
+    keys.uniq
+  end
+
+  def self.baseline_path(path, root)
+    File.expand_path(path).delete_prefix("#{root}/")
+  end
+
+  def self.read_baseline(path)
+    File.readlines(path, chomp: true).reject { |line| line.strip.empty? || line.start_with?('#') }
+        .to_set { |line| line.split("\t", 2) }
+  end
+
+  def self.write_baseline(results, options, root)
+    path = options[:baseline] || File.join(root, BASELINE_FILE)
+    keys = violation_keys(results, options, root).sort
+    header = "# julia-audit baseline: known violations that do not fail the audit.\n" \
+             "# Regenerate with julia-audit --write-baseline; remove entries as code is fixed.\n"
+    File.write(path, header + keys.map { |k| "#{k.join("\t")}\n" }.join)
+    puts "Wrote #{keys.length} baseline entries to #{path}"
+    0
+  end
+
+  # Drops baselined violations from results and records stale entries.
+  def self.apply_baseline(results, options, root)
+    path = options[:baseline] || File.join(root, BASELINE_FILE)
+    return results unless File.file?(path)
+
+    baseline = read_baseline(path)
+    present = violation_keys(results, options, root).to_set
+    listed = ->(file, key) { baseline.include?([baseline_path(file, root), key]) }
+    results.definitions.reject! { |d| listed.call(d.file, "def:#{d.name}") }
+    results.files.reject! { |info| file_status(info, options) && listed.call(info.file, 'file-length') }
+    results.findings.reject! { |f| listed.call(f.file, "rule:#{f.rule}") }
+    results.stale = (baseline - present).to_a.sort
+    results
+  end
+
   # --- File discovery ---------------------------------------------------------
 
   def self.test_file?(path)
@@ -126,9 +183,13 @@ module JuliaCodeAuditor
       path.include?('/test/')
   end
 
-  def self.default_project_files
+  def self.project_root
     root = `git rev-parse --show-toplevel 2>/dev/null`.strip
-    root = Dir.pwd if root.empty?
+    root.empty? ? Dir.pwd : root
+  end
+
+  def self.default_project_files
+    root = project_root
     patterns = %w[src/**/*.jl ext/**/*.jl test/**/*.jl bin/* tools/* scripts/* *.jl]
     patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern)) }
   end
@@ -157,6 +218,12 @@ module JuliaCodeAuditor
   def self.add_mode_options(opts, options)
     opts.on('--include-tests', 'Include test files in audit') { options[:include_tests] = true }
     opts.on('--strict', 'Treat warnings as fatal errors') { options[:strict] = true }
+    opts.on('--baseline FILE', "Known-violation list (default: #{BASELINE_FILE} at the project root)") do |path|
+      options[:baseline] = File.expand_path(path)
+    end
+    opts.on('--write-baseline', 'Record the current violations as the baseline and exit 0') do
+      options[:write_baseline] = true
+    end
     opts.on('-q', '--quiet', 'Show only violations and warnings') { options[:quiet] = true }
     opts.on('-v', '--verbose', 'Show the most complex audited methods') { options[:verbose] = true }
     opts.on('--version', 'Show version and exit') do
@@ -207,6 +274,12 @@ module JuliaCodeAuditor
     end
   end
 
+  def self.print_stale(results)
+    (results.stale || []).each do |file, key|
+      puts "  \e[33m⚠️ Stale baseline entry (fixed? remove it): #{file}\t#{key}\e[0m"
+    end
+  end
+
   def self.print_traps(traps)
     return if traps.empty?
 
@@ -233,12 +306,14 @@ module JuliaCodeAuditor
   def self.warnings?(results, options)
     results.files.any? { |info| file_status(info, options) == :soft } ||
       results.findings.any? { |f| f.severity == :warn } ||
-      results.definitions.any? { |d| d.args > options[:max_args] }
+      results.definitions.any? { |d| d.args > options[:max_args] } ||
+      !(results.stale || []).empty?
   end
 
   def self.report_results(results, options)
     print_verbose(results) if options[:verbose]
     print_warnings(results, options)
+    print_stale(results)
     results.errors.each { |message| puts "\e[31m❌ Parse error: #{message}\e[0m" }
     traps = results.findings.select { |f| f.severity == :trap }
     print_traps(traps)
@@ -260,7 +335,11 @@ module JuliaCodeAuditor
     files = collect_target_files(paths, options[:include_tests])
     abort 'no Julia sources found in requested paths' if files.empty?
 
-    report_results(measure(files), options)
+    results = measure(files)
+    root = project_root
+    return write_baseline(results, options, root) if options[:write_baseline]
+
+    report_results(apply_baseline(results, options, root), options)
   rescue StandardError => e
     warn "julia-audit: #{e.message}"
     2
