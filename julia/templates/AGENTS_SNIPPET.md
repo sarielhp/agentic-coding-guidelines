@@ -42,7 +42,8 @@ execution; it does not authorize commits, releases, registration, or changes out
 the task. Reuse authorization already given in the session. Keep sandboxing and manual
 approval review enabled. Bootstrap the analysis packages separately, when authorized, with
 `julia-install-tools`; the gates never install anything. Never enlarge an allow marker
-(`# julia-audit: allow-<rule>`) to hide a new finding.
+(`# julia-audit: allow-<rule>`) or add entries to `.julia-audit-baseline` to hide a new
+finding; remove baseline entries for code you fix.
 
 Before any refactor of numerical code, record the outputs on fixed inputs and require
 bit-identical results afterwards; a result change is its own deliberate commit.

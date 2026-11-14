@@ -167,4 +167,4 @@ A warning becomes a failure with `--strict`. Traps always fail. Suppress one on 
 
 JET needs the project to load (`Pkg.instantiate()` done) and can report false positives; fix real findings, and for a justified false positive prefer restructuring the code so that the return type is concrete over suppressing the report.
 
-Copy `templates/dot_JuliaFormatter.toml` as the project's `.JuliaFormatter.toml` and add the snippet in [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md) to the project's agent instructions. Lifecycle helpers (`tools/build`, `tools/gate`, `tools/commit`, `tools/bump`, …) for Julia are not provided yet; run the commands above directly.
+Copy `templates/dot_JuliaFormatter.toml` as the project's `.JuliaFormatter.toml` and add the snippet in [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md) to the project's agent instructions. Copy the lifecycle helpers from [templates/](templates/) into `tools/` (see README, "Lifecycle templates"): `tools/gate` runs the fast gate and `tools/gate --full` the release gate; project-specific slower checks go in `FULL_CHECKS` in `tools/settings.rb`.

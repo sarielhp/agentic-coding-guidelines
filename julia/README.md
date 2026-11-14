@@ -37,10 +37,12 @@ julia-install-tools                # install into the tools environment (require
 
 ## Adopting the standard in a project
 
-1. Copy [templates/dot_JuliaFormatter.toml](templates/dot_JuliaFormatter.toml) to `.JuliaFormatter.toml`, format the code in one formatting-only commit, and verify behavior is unchanged.
+1. Copy [templates/dot_JuliaFormatter.toml](templates/dot_JuliaFormatter.toml) to `.JuliaFormatter.toml`, format the code in one formatting-only commit, verify behavior is unchanged, and list that commit in `.git-blame-ignore-revs` (`git config blame.ignoreRevsFile .git-blame-ignore-revs`).
 2. Add [templates/AGENTS_SNIPPET.md](templates/AGENTS_SNIPPET.md) to the project's agent instructions.
-3. Run `julia-audit --strict` and `julia-static-analysis`; fix findings or record justified `allow` markers.
-4. Put `Aqua.test_all` in the test suite.
+3. Copy the lifecycle templates into `tools/` (see "Lifecycle templates" below) and run `tools/gate --full`.
+4. Fix the `julia-static-analysis` findings (JET, ExplicitImports). For existing `julia-audit` violations that cannot be fixed yet, record them with `julia-audit --write-baseline` in a committed `.julia-audit-baseline`; new violations then fail, and the baseline only shrinks.
+5. Mark library code that legitimately uses the caller's temporary directory (scratch files removed at process exit) with `tmp-exempt: <reason>`.
+6. Put `Aqua.test_all` in the test suite.
 
 ## Review cycle sandbox
 
