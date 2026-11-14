@@ -1,0 +1,141 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# git_fix_filename_renames: undo a file-name normalizer's renames in git repositories.
+# Run with -h for the full description.
+
+require 'find'
+require 'fileutils'
+require 'optparse'
+
+USAGE = 'usage: git_fix_filename_renames [--apply] REPO...'
+HELP = <<~TXT.freeze
+  #{USAGE}
+
+  A file-name normalizer (lower case, '-' and other punctuation turned into '_')
+  run over a git repository breaks it: .git/HEAD becomes .git/head, packed-refs
+  becomes packed_refs, pack-SHA.pack becomes pack_SHA.pack, and git no longer sees
+  a repository there ("not a git repository"). The tracked files are renamed too
+  (planar_DG.ipe -> planar_dg.ipe, cc-by.pdf -> cc_by.pdf), so they look deleted.
+
+  For each REPO (a work tree whose .git is a directory) this
+    1. gives git's own files in .git their names back (HEAD, ORIG_HEAD,
+       FETCH_HEAD, COMMIT_EDITMSG, packed-refs, logs/HEAD, refs/remotes/*/HEAD,
+       objects/pack/pack-*, the hook samples); branch and tag names are kept;
+    2. renames each tracked file that git now sees as deleted back to its
+       tracked name, when exactly one untracked file has the same normalized
+       name. Deleted files without such a match are counted and left alone.
+
+  Without --apply it only prints what it would rename. It never overwrites: a
+  target that already exists stops the run. Check afterwards with
+  git fsck and git status.
+TXT
+
+GIT_TOP = %w[HEAD ORIG_HEAD FETCH_HEAD MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD AUTO_MERGE
+             COMMIT_EDITMSG MERGE_MSG MERGE_MODE MERGE_RR BISECT_LOG packed-refs shallow].freeze
+GIT_HOOKS = %w[applypatch-msg commit-msg fsmonitor-watchman post-update pre-applypatch pre-commit
+               pre-merge-commit pre-push pre-rebase pre-receive prepare-commit-msg push-to-checkout
+               sendemail-validate update].freeze
+
+def mangle(name) = name.downcase.tr('-', '_')
+
+TOP_NAMES = GIT_TOP.to_h { |name| [mangle(name), name] }
+HOOK_NAMES = GIT_HOOKS.flat_map { |hook| [[mangle(hook), hook], ["#{mangle(hook)}.sample", "#{hook}.sample"]] }.to_h
+
+# ---- .git ---------------------------------------------------------------------------------
+
+# The right name of the entry at REL (relative to .git), or nil when it is fine.
+def git_name(rel)
+  dir = File.dirname(rel)
+  base = File.basename(rel)
+  right = case dir
+          when '.' then TOP_NAMES[base]
+          when 'hooks' then HOOK_NAMES[base]
+          when 'logs', %r{\A(?:logs/)?refs/remotes/[^/]+\z} then base == 'head' ? 'HEAD' : nil
+          when 'objects/pack' then base.sub(/\Apack_(?=[0-9a-f]{40,64}\.)/, 'pack-')
+          end
+  return nil if right.nil? || right == base
+
+  dir == '.' ? right : File.join(dir, right)
+end
+
+# [[from, to], ...] relative to GIT, loose objects skipped.
+def git_renames(git)
+  list = []
+  Find.find(git) do |path|
+    next if path == git
+
+    rel = path.delete_prefix("#{git}/")
+    Find.prune if rel.match?(%r{\Aobjects/[0-9a-f]{2}\z})
+    target = git_name(rel)
+    list << [rel, target] if target
+  end
+  list
+end
+
+# ---- the work tree ----------------------------------------------------------------------------
+
+# The normalized form of a path: lower case, every character but letters and digits of each part's
+# stem as '_', the extension kept.
+def tree_key(path)
+  path.split('/').map do |part|
+    ext = File.extname(part)
+    stem = ext.empty? || part == ext ? part : part.delete_suffix(ext)
+    "#{stem.downcase.gsub(/[^a-z0-9]/, '_')}#{ext.downcase}"
+  end.join('/')
+end
+
+def git_files(tree, *args) = IO.popen(['git', '-C', tree, 'ls-files', '-z', *args], &:read).split("\0")
+
+# [[untracked path, tracked path], ...] and the number of deleted files without a match.
+def tree_renames(tree)
+  deleted = git_files(tree, '--deleted')
+  untracked = git_files(tree, '--others').group_by { |path| tree_key(path) }
+  list = deleted.filter_map do |path|
+    found = untracked[tree_key(path)]
+    [found.first, path] if found&.size == 1
+  end
+  [list, deleted.size - list.size]
+end
+
+# ---- running ------------------------------------------------------------------------------
+
+def rename_all(base, list, apply)
+  list.each do |from, to|
+    puts "  #{from} -> #{to}"
+    target = File.join(base, to)
+    abort "#{target} already exists; stopped" if File.exist?(target)
+    next unless apply
+
+    FileUtils.mkdir_p(File.dirname(target))
+    File.rename(File.join(base, from), target)
+  end
+end
+
+def fix(repo, apply)
+  git = File.join(repo, '.git')
+  return warn("#{repo}: no .git directory; skipped") unless File.directory?(git)
+
+  list = git_renames(git)
+  puts "#{repo}: #{list.size} name(s) in .git"
+  rename_all(git, list, apply)
+  # The work tree can only be read once git sees the repository again.
+  return puts('  (work tree: rerun with --apply to see it)') unless apply || list.empty?
+
+  files, unmatched = tree_renames(repo)
+  puts "#{repo}: #{files.size} tracked file(s) back to their names, #{unmatched} deleted file(s) without a match"
+  rename_all(repo, files, apply)
+end
+
+apply = false
+OptionParser.new do |opts|
+  opts.banner = USAGE
+  opts.on('--apply', 'Rename (default: only show the renames)') { apply = true }
+  opts.on('-h', '--help', 'This message') do
+    puts HELP
+    exit
+  end
+end.parse!
+abort USAGE if ARGV.empty?
+ARGV.each { |repo| fix(File.expand_path(repo), apply) }
+puts '(dry run; --apply to rename)' unless apply
