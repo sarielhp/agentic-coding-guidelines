@@ -187,10 +187,15 @@ class LatexGitToolsTest < Minitest::Test
       lone = File.join(root, 'papers', 'lone')
       FileUtils.mkdir_p(lone)
       git(lone, 'init', '-q')
+      state = File.join(me, 'tools', 'state')
+      FileUtils.mkdir_p(state)
+      git(state, 'init', '-q')
+      git(state, 'commit', '-q', '--allow-empty', '-m', 'state')
       out, _err, status = run_tool('git_latex_sync', '--all', root, '--no-compile', dir: root)
       refute status.success?
       assert_match(%r{\[1/3\] .*coauthor}, out)
       assert_match(/1 of 3 repositories done/, out)
+      refute_match(%r{tools/state}, out, 'a tool state repository is skipped')
       assert_match(/FAILED \(2\):\n.*me: Merge undone.*\n.*lone: No upstream/, out)
       assert_empty git(me, 'diff', '--name-only', '--diff-filter=U'), 'the conflicted merge is undone'
       out, = run_tool('git_latex_sync', '-info', dir: me)

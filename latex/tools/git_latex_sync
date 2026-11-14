@@ -63,7 +63,8 @@ HELP = <<~TXT.freeze
                    that do not look like paper sources stay uncommitted, and
                    a paper that stopped compiling is not pushed. Rerun
                    git_latex_sync inside a repository listed as FAILED to
-                   settle it by hand.
+                   settle it by hand. Repositories below a tools/ directory
+                 (a tool's own state, such as a review queue) are skipped.
     -h, --help     this message (also -H, -help, --h, --H)
 
   WORKFLOW
@@ -355,17 +356,19 @@ end
 # ---- --all: every repository under some directories ---------------------------------
 
 # The work trees under DIRS: each directory holding a .git (a directory, or a file for a worktree).
+# A repository below a tools/ directory is a tool's own state (a review queue), not a paper: skipped.
 def repositories(dirs)
   dirs.flat_map do |dir|
     abort "Not a directory: #{dir}" unless File.directory?(dir)
+    root = File.expand_path(dir)
     found = []
-    Find.find(File.expand_path(dir)) do |path|
+    Find.find(root) do |path|
       next unless File.basename(path) == '.git'
 
       found << File.dirname(path)
       Find.prune
     end
-    found
+    found.reject { |repo| repo.delete_prefix(root).split('/').include?('tools') }
   end.uniq.sort
 end
 
