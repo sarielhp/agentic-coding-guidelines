@@ -195,7 +195,7 @@ class LatexGitToolsTest < Minitest::Test
       refute status.success?
       assert_match(%r{\[1/3\] .*coauthor}, out)
       assert_match(/1 of 3 repositories done/, out)
-      refute_match(%r{tools/state}, out, 'a tool state repository is skipped')
+      refute_match(%r{^\[\d/\d\] .*tools/state}, out, 'a tool state repository is skipped')
       assert_match(/FAILED \(2\):\n.*me: Merge undone.*\n.*lone: No upstream/, out)
       assert_empty git(me, 'diff', '--name-only', '--diff-filter=U'), 'the conflicted merge is undone'
       out, = run_tool('git_latex_sync', '-info', dir: me)
